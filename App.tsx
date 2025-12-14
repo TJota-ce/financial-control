@@ -44,10 +44,13 @@ const AppContent = () => {
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-800">
       <Header activePage={activePage} setActivePage={setActivePage} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-4 sm:p-6 lg:p-8">
+      <main className="flex-1 overflow-y-auto flex flex-col">
+        <div className="p-4 sm:p-6 lg:p-8 flex-grow">
           {renderPage()}
         </div>
+        <footer className="py-6 text-center text-sm text-white bg-dark border-t border-white/10 mt-auto">
+          © 2025 Solution. Todos os direitos reservados.
+        </footer>
       </main>
     </div>
   );

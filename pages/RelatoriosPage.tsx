@@ -1,13 +1,27 @@
 
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
-import { addMonths, eachMonthOfInterval, endOfMonth, format, getYear, isSameMonth, parseISO, startOfMonth, subMonths, isValid } from 'date-fns';
+import { addMonths, eachMonthOfInterval, endOfMonth, format, getYear, isSameMonth, parseISO, startOfMonth, subMonths, isValid, isBefore, isAfter, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+const formatDate = (date: Date) => format(date, 'dd/MM/yyyy');
 
 type PeriodOption = 'thisMonth' | 'last3Months' | 'thisYear';
+
+interface Transaction {
+  id: string;
+  date: Date;
+  description: string;
+  category: string;
+  value: number;
+  type: 'credit' | 'debit';
+  balanceAfter?: number;
+}
 
 const LoadingSpinner: React.FC = () => (
   <div className="flex justify-center items-center h-64">
@@ -16,10 +30,16 @@ const LoadingSpinner: React.FC = () => (
 );
 
 const RelatoriosPage: React.FC = () => {
-  const { plantoes, getUpdatedPlantoes, getUpdatedRecebiveis, loading } = useFinance();
+  const { plantoes, despesas, recebiveis, getUpdatedPlantoes, getUpdatedRecebiveis, loading } = useFinance();
   const [activeTab, setActiveTab] = useState('visaoGeral');
+  
+  // States para Visão Geral
   const [period, setPeriod] = useState<PeriodOption>('thisMonth');
   
+  // States para Extrato
+  const [extratoMonth, setExtratoMonth] = useState(new Date());
+
+  // --- LÓGICA DA VISÃO GERAL ---
   const { startDate, endDate } = useMemo(() => {
     const now = new Date();
     switch (period) {
@@ -89,6 +109,317 @@ const RelatoriosPage: React.FC = () => {
     return Object.entries(grouped).map(([hospital, data]) => ({ hospital, ...data })).sort((a,b) => b.count - a.count);
   },[getUpdatedPlantoes]);
 
+  // --- LÓGICA DO EXTRATO ---
+  const extratoData = useMemo(() => {
+    const startOfExtratoMonth = startOfMonth(extratoMonth);
+    // const endOfExtratoMonth = endOfMonth(extratoMonth); // Not used currently
+    
+    // Define o limite de "hoje" (fim do dia) para considerar despesas como efetivadas
+    const todayLimit = endOfDay(new Date());
+
+    // 1. Calcular Saldo Anterior (Tudo antes do dia 01 do mês selecionado)
+    let saldoAnterior = 0;
+
+    // Entradas anteriores (Plantões pagos)
+    getUpdatedPlantoes().forEach(p => {
+        if (p.status === 'Recebido' && p.data_recebida) {
+            const dt = parseISO(p.data_recebida);
+            if (isValid(dt) && isBefore(dt, startOfExtratoMonth)) {
+                saldoAnterior += p.valor;
+            }
+        }
+    });
+    // Entradas anteriores (Outros recebíveis pagos)
+    getUpdatedRecebiveis().forEach(r => {
+        if (r.status === 'Recebido' && r.data_recebida) {
+            const dt = parseISO(r.data_recebida);
+            if (isValid(dt) && isBefore(dt, startOfExtratoMonth)) {
+                saldoAnterior += r.valor;
+            }
+        }
+    });
+    // Saídas anteriores (Despesas)
+    despesas.forEach(d => {
+        const dt = parseISO(d.data);
+        // Despesa conta se for antes do mês selecionado E se a data já passou (ou é hoje)
+        if (isValid(dt) && isBefore(dt, startOfExtratoMonth) && !isAfter(dt, todayLimit)) {
+            saldoAnterior -= d.valor;
+        }
+    });
+
+    // 2. Listar Transações do Mês
+    const transactions: Transaction[] = [];
+
+    // Plantões do mês
+    getUpdatedPlantoes().forEach(p => {
+        if (p.status === 'Recebido' && p.data_recebida) {
+            const dt = parseISO(p.data_recebida);
+            if (isValid(dt) && isSameMonth(dt, extratoMonth)) {
+                transactions.push({
+                    id: p.id,
+                    date: dt,
+                    description: `Plantão - ${p.hospital}`,
+                    category: 'Plantão',
+                    value: p.valor,
+                    type: 'credit'
+                });
+            }
+        }
+    });
+
+    // Recebíveis do mês
+    getUpdatedRecebiveis().forEach(r => {
+        if (r.status === 'Recebido' && r.data_recebida) {
+             const dt = parseISO(r.data_recebida);
+             if (isValid(dt) && isSameMonth(dt, extratoMonth)) {
+                transactions.push({
+                    id: r.id,
+                    date: dt,
+                    description: r.descricao,
+                    category: 'Outros',
+                    value: r.valor,
+                    type: 'credit'
+                });
+             }
+        }
+    });
+
+    // Despesas do mês
+    despesas.forEach(d => {
+        const dt = parseISO(d.data);
+         // Despesa conta se for no mês selecionado E se a data já passou (ou é hoje)
+         if (isValid(dt) && isSameMonth(dt, extratoMonth) && !isAfter(dt, todayLimit)) {
+            transactions.push({
+                id: d.id,
+                date: dt,
+                description: d.descricao,
+                category: d.categoria,
+                value: d.valor,
+                type: 'debit'
+            });
+         }
+    });
+
+    // 3. Ordenar por data
+    transactions.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    // 4. Calcular Saldo Linha a Linha e Totais do Mês
+    let currentBalance = saldoAnterior;
+    let totalEntradas = 0;
+    let totalSaidas = 0;
+
+    const processedTransactions = transactions.map(t => {
+        if (t.type === 'credit') {
+            currentBalance += t.value;
+            totalEntradas += t.value;
+        } else {
+            currentBalance -= t.value;
+            totalSaidas += t.value;
+        }
+        return { ...t, balanceAfter: currentBalance };
+    });
+
+    return {
+        saldoAnterior,
+        transactions: processedTransactions,
+        totalEntradas,
+        totalSaidas,
+        saldoFinal: currentBalance
+    };
+
+  }, [extratoMonth, getUpdatedPlantoes, getUpdatedRecebiveis, despesas]);
+
+  // --- EXPORT FUNCTIONS ---
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const monthStr = format(extratoMonth, 'MMMM yyyy', { locale: ptBR }).toUpperCase();
+    
+    // --- APP HEADER ---
+    // Logo Background
+    doc.setFillColor(79, 70, 229); // Primary Indigo (#4F46E5)
+    doc.roundedRect(14, 10, 12, 12, 3, 3, 'F');
+
+    // Logo Icon (Lightning Bolt) - Vector Drawing
+    doc.setFillColor(255, 255, 255);
+    // Path vectors scaled (0.25 scale factor => 24 units = 6mm size)
+    // Centered in 12mm box (margin 3mm)
+    const s = 0.25;
+    const ix = 14 + 3; // X Origin for icon
+    const iy = 10 + 3; // Y Origin for icon
+    
+    // Start at path origin relative to grid (13, 10)
+    const sx = ix + (13 * s);
+    const sy = iy + (10 * s);
+
+    // Drawing Path: M13 10V3L4 14h7v7l9-11h-7z
+    doc.lines(
+        [
+            [0, -7 * s],      // V3 (10->3)
+            [-9 * s, 11 * s], // L4 14 (13,3 -> 4,14)
+            [7 * s, 0],       // h7
+            [0, 7 * s],       // v7
+            [9 * s, -11 * s], // l9 -11
+            [-7 * s, 0]       // h-7
+        ],
+        sx,
+        sy,
+        [1, 1],
+        'F',
+        true
+    );
+
+    // App Name & Branding
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(30, 41, 59); // Slate 800
+    doc.text("Shifts", 30, 18);
+
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184); // Slate 400
+    doc.text("GESTÃO FINANCEIRA", 30, 22);
+
+    // --- REPORT CONTENT ---
+    const startY_Report = 35;
+    
+    // Title
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`EXTRATO MENSAL - ${monthStr}`, 14, startY_Report);
+    
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, startY_Report + 5);
+
+    // Summary Box
+    const boxY = 45;
+    doc.setDrawColor(226, 232, 240); // Slate 200
+    doc.setFillColor(248, 250, 252); // Slate 50
+    doc.roundedRect(14, boxY, 182, 24, 2, 2, 'FD');
+    
+    const textY = boxY + 8;
+    const valY = boxY + 16;
+
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text("Saldo Anterior", 20, textY);
+    doc.text("Entradas", 70, textY);
+    doc.text("Saídas", 120, textY);
+    doc.text("Saldo Final", 170, textY);
+
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(50);
+    doc.text(formatCurrency(extratoData.saldoAnterior), 20, valY);
+    
+    doc.setTextColor(16, 185, 129); // Emerald
+    doc.text(`+ ${formatCurrency(extratoData.totalEntradas)}`, 70, valY);
+    
+    doc.setTextColor(225, 29, 72); // Rose
+    doc.text(`- ${formatCurrency(extratoData.totalSaidas)}`, 120, valY);
+    
+    doc.setTextColor(79, 70, 229); // Primary (Indigo)
+    doc.text(formatCurrency(extratoData.saldoFinal), 170, valY);
+
+    // Table
+    const tableBody = extratoData.transactions.map(t => [
+        formatDate(t.date),
+        t.description,
+        t.category,
+        t.type === 'credit' ? `+ ${formatCurrency(t.value)}` : `- ${formatCurrency(t.value)}`,
+        formatCurrency(t.balanceAfter || 0)
+    ]);
+
+    // Initial Row (Previous Balance)
+    const initialRow = [
+        formatDate(startOfMonth(extratoMonth)),
+        'Saldo Anterior',
+        '-',
+        '-',
+        formatCurrency(extratoData.saldoAnterior)
+    ];
+
+    autoTable(doc, {
+        startY: boxY + 30,
+        head: [['Data', 'Descrição', 'Categoria', 'Valor', 'Saldo']],
+        body: [initialRow, ...tableBody],
+        styles: { fontSize: 9, cellPadding: 3 },
+        headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold', lineColor: [226, 232, 240], lineWidth: 0.1 },
+        columnStyles: {
+            3: { halign: 'right', fontStyle: 'bold' }, // Valor
+            4: { halign: 'right' }  // Saldo
+        },
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index === 3) {
+                 const text = data.cell.raw as string;
+                 if (text.includes('+')) data.cell.styles.textColor = [16, 185, 129];
+                 else if (text.includes('-')) data.cell.styles.textColor = [225, 29, 72];
+            }
+        },
+        didDrawPage: (data) => {
+            const str = "© 2025 Solution. Todos os direitos reservados.";
+            doc.setFontSize(8);
+            doc.setTextColor(148, 163, 184); // Slate 400
+            const pageSize = doc.internal.pageSize;
+            const pageHeight = pageSize.height ? pageSize.height : pageSize.getHeight();
+            const pageWidth = pageSize.width ? pageSize.width : pageSize.getWidth();
+            doc.text(str, pageWidth / 2, pageHeight - 10, { align: 'center' });
+        }
+    });
+
+    doc.save(`Extrato_${format(extratoMonth, 'yyyy_MM')}.pdf`);
+  };
+
+  const handleExportExcel = () => {
+    const monthStr = format(extratoMonth, 'MMMM yyyy', { locale: ptBR });
+    
+    const wsData = [
+        ['EXTRATO MENSAL', monthStr.toUpperCase()],
+        ['Gerado em', format(new Date(), 'dd/MM/yyyy HH:mm')],
+        [],
+        ['RESUMO DO PERÍODO'],
+        ['Saldo Anterior', extratoData.saldoAnterior],
+        ['Total Entradas', extratoData.totalEntradas],
+        ['Total Saídas', extratoData.totalSaidas],
+        ['Saldo Final', extratoData.saldoFinal],
+        [],
+        ['LANÇAMENTOS'],
+        ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Saldo Acumulado']
+    ];
+
+    // Add Initial Balance Row
+    wsData.push([
+        formatDate(startOfMonth(extratoMonth)),
+        'Saldo Anterior',
+        '-',
+        '-',
+        '-',
+        extratoData.saldoAnterior
+    ]);
+
+    // Add Transactions
+    extratoData.transactions.forEach(t => {
+        wsData.push([
+            formatDate(t.date),
+            t.description,
+            t.category,
+            t.type === 'credit' ? 'Crédito' : 'Débito',
+            t.type === 'credit' ? t.value : -t.value, // Excel stores raw numbers
+            t.balanceAfter
+        ]);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Format numbers
+    const currencyFmt = '"R$" #,##0.00';
+    // Logic to apply ranges would be complex here without Pro features of SheetJS, 
+    // but standard raw numbers work fine for Excel.
+
+    XLSX.utils.book_append_sheet(wb, ws, "Extrato");
+    XLSX.writeFile(wb, `Extrato_${format(extratoMonth, 'yyyy_MM')}.xlsx`);
+  };
 
   // Cores: Primary (Indigo) e Secondary (Violet)
   const COLORS = ['#4F46E5', '#7C3AED'];
@@ -147,10 +478,139 @@ const RelatoriosPage: React.FC = () => {
                 }
             </div>
         );
+      case 'extrato':
+        return (
+            <div className="space-y-6 animate-fade-in">
+                {/* Header do Extrato */}
+                <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm gap-4">
+                    <div className="flex items-center gap-2 md:w-1/3">
+                         {/* Spacer or additional controls if needed */}
+                    </div>
+
+                    <div className="flex items-center justify-center gap-4 md:w-1/3">
+                        <button onClick={() => setExtratoMonth(prev => subMonths(prev, 1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">
+                            <ChevronLeftIcon />
+                        </button>
+                        <div className="flex flex-col items-center min-w-[140px]">
+                            <h2 className="text-xl font-bold text-slate-800 capitalize">
+                                {format(extratoMonth, 'MMMM yyyy', { locale: ptBR })}
+                            </h2>
+                            <span className="text-[10px] text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full mt-1 whitespace-nowrap">
+                                Lançamentos até {formatDate(endOfDay(new Date()))}
+                            </span>
+                        </div>
+                        <button onClick={() => setExtratoMonth(prev => addMonths(prev, 1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">
+                            <ChevronRightIcon />
+                        </button>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 md:w-1/3">
+                        <button 
+                            onClick={handleExportPDF}
+                            className="flex items-center gap-2 px-3 py-2 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 border border-rose-200 transition-colors text-sm font-medium"
+                            title="Exportar para PDF"
+                        >
+                            <PDFIcon />
+                            <span className="hidden sm:inline">PDF</span>
+                        </button>
+                        <button 
+                            onClick={handleExportExcel}
+                            className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 border border-emerald-200 transition-colors text-sm font-medium"
+                            title="Exportar para Excel"
+                        >
+                            <ExcelIcon />
+                            <span className="hidden sm:inline">Excel</span>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Cards de Resumo */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <p className="text-xs font-semibold text-slate-500 uppercase">Saldo Anterior</p>
+                        <p className="text-lg font-bold text-slate-700">{formatCurrency(extratoData.saldoAnterior)}</p>
+                    </div>
+                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                        <p className="text-xs font-semibold text-emerald-600 uppercase">Entradas</p>
+                        <p className="text-lg font-bold text-emerald-700">+ {formatCurrency(extratoData.totalEntradas)}</p>
+                    </div>
+                    <div className="bg-rose-50 p-4 rounded-xl border border-rose-100">
+                        <p className="text-xs font-semibold text-rose-600 uppercase">Saídas</p>
+                        <p className="text-lg font-bold text-rose-700">- {formatCurrency(extratoData.totalSaidas)}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl border border-primary/20 shadow-sm ring-1 ring-primary/10">
+                        <p className="text-xs font-semibold text-primary uppercase">Saldo Final</p>
+                        <p className="text-lg font-bold text-primary">{formatCurrency(extratoData.saldoFinal)}</p>
+                    </div>
+                </div>
+
+                {/* Tabela de Extrato */}
+                <div className="bg-white rounded-xl shadow-soft border border-slate-100 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
+                                <tr>
+                                    <th className="px-6 py-4">Data</th>
+                                    <th className="px-6 py-4">Descrição</th>
+                                    <th className="px-6 py-4">Categoria</th>
+                                    <th className="px-6 py-4 text-right">Valor</th>
+                                    <th className="px-6 py-4 text-right">Saldo</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {/* Linha de Saldo Inicial */}
+                                <tr className="bg-slate-50/50">
+                                    <td className="px-6 py-4 font-medium text-slate-400">{formatDate(startOfMonth(extratoMonth))}</td>
+                                    <td className="px-6 py-4 font-medium text-slate-500 italic">Saldo Anterior</td>
+                                    <td className="px-6 py-4">-</td>
+                                    <td className="px-6 py-4 text-right text-slate-400">-</td>
+                                    <td className="px-6 py-4 text-right font-bold text-slate-600">{formatCurrency(extratoData.saldoAnterior)}</td>
+                                </tr>
+
+                                {extratoData.transactions.length === 0 ? (
+                                     <tr>
+                                        <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
+                                            Nenhuma movimentação efetivada neste mês.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    extratoData.transactions.map((t) => (
+                                        <tr key={t.id + t.type} className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-6 py-4 text-slate-600">{formatDate(t.date)}</td>
+                                            <td className="px-6 py-4 font-medium text-slate-800">{t.description}</td>
+                                            <td className="px-6 py-4">
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${t.type === 'credit' ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                    {t.category}
+                                                </span>
+                                            </td>
+                                            <td className={`px-6 py-4 text-right font-bold ${t.type === 'credit' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                {t.type === 'credit' ? '+' : '-'} {formatCurrency(t.value)}
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-semibold text-slate-700">
+                                                {formatCurrency(t.balanceAfter || 0)}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
       case 'visaoGeral':
       default:
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+             {/* Header Visão Geral */}
+             <div className="lg:col-span-2 flex justify-end">
+                 <select value={period} onChange={e => setPeriod(e.target.value as PeriodOption)} className="p-2.5 border border-slate-200 rounded-lg bg-white text-sm font-medium text-slate-700 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                     <option value="thisMonth">Este Mês</option>
+                     <option value="last3Months">Últimos 3 Meses</option>
+                     <option value="thisYear">Este Ano</option>
+                 </select>
+             </div>
+
             <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
               <h3 className="text-lg font-bold text-slate-800 mb-6">Composição da Receita</h3>
               <ResponsiveContainer width="100%" height={300}>
@@ -207,15 +667,11 @@ const RelatoriosPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Relatórios Financeiros</h1>
-         <select value={period} onChange={e => setPeriod(e.target.value as PeriodOption)} className="p-2.5 border border-slate-200 rounded-lg bg-white text-sm font-medium text-slate-700 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
-             <option value="thisMonth">Este Mês</option>
-             <option value="last3Months">Últimos 3 Meses</option>
-             <option value="thisYear">Este Ano</option>
-         </select>
       </div>
 
       <div className="bg-white p-1.5 rounded-xl border border-slate-100 inline-flex flex-wrap gap-1 shadow-sm">
         <TabButton tabKey="visaoGeral" title="Visão Geral" />
+        <TabButton tabKey="extrato" title="Extrato Mensal" />
         <TabButton tabKey="pendencias" title="Pendências" />
         <TabButton tabKey="rankingAtrasos" title="Ranking de Atrasos" />
       </div>
@@ -224,5 +680,29 @@ const RelatoriosPage: React.FC = () => {
     </div>
   );
 };
+
+const ChevronLeftIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+    </svg>
+);
+
+const ChevronRightIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+);
+
+const PDFIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+    </svg>
+);
+
+const ExcelIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 5h14a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+);
 
 export default RelatoriosPage;

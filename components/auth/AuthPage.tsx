@@ -62,7 +62,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
                 </svg>
             </div>
             <h1 className="text-4xl font-bold text-slate-800 tracking-tight">Shifts</h1>
-            <p className="text-slate-500 font-medium tracking-wide">Gestão Financeira para Médicos</p>
+            <p className="text-slate-500 font-medium tracking-wide">Gestão Financeira</p>
         </div>
 
         <div className="bg-white p-8 rounded-2xl shadow-soft border border-slate-100 space-y-6">
