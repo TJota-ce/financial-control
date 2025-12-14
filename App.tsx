@@ -77,7 +77,14 @@ const App = () => {
   }, []);
   
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+        await supabase.auth.signOut();
+    } catch (error) {
+        console.error("Erro ao fazer logout:", error);
+    } finally {
+        // Força a limpeza da sessão local para garantir a atualização da UI
+        setSession(null);
+    }
   };
 
   if (loading) {

@@ -2,13 +2,16 @@
 import React, { useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
 import MetricCard from '../components/dashboard/MetricCard';
-import StatusBadge from '../components/common/StatusBadge';
 import { format, getMonth, getYear, isSameMonth, parseISO, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+};
+
+const formatPercent = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value);
 };
 
 const LoadingSpinner: React.FC = () => (
@@ -16,6 +19,21 @@ const LoadingSpinner: React.FC = () => (
     <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div>
   </div>
 );
+
+// Helper para ícones de categoria
+const getCategoryIcon = (categoryName: string) => {
+  const normalized = categoryName.toLowerCase();
+  if (normalized.includes('transporte') || normalized.includes('combustível') || normalized.includes('carro')) return <BusIcon />;
+  if (normalized.includes('mercado') || normalized.includes('alimentação') || normalized.includes('comida')) return <ShoppingCartIcon />;
+  if (normalized.includes('moradia') || normalized.includes('casa') || normalized.includes('aluguel')) return <HomeIcon />;
+  if (normalized.includes('saúde') || normalized.includes('médico')) return <HeartIcon />;
+  if (normalized.includes('lazer') || normalized.includes('viagem')) return <SmileIcon />;
+  if (normalized.includes('educação') || normalized.includes('curso')) return <AcademicCapIcon />;
+  if (normalized.includes('roupa') || normalized.includes('vestuário')) return <ShoppingBagIcon />;
+  return <TagIcon />;
+};
+
+const COLORS = ['#4F46E5', '#7C3AED', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#8B5CF6'];
 
 const DashboardPage: React.FC = () => {
   const { getUpdatedPlantoes, getUpdatedRecebiveis, despesas, loading } = useFinance();
@@ -62,6 +80,25 @@ const DashboardPage: React.FC = () => {
     }
     return dataPoints;
   }, [plantoes, recebiveis]);
+
+  const expensesByCategory = useMemo(() => {
+    const now = new Date();
+    const currentMonthExpenses = despesas.filter(d => isSameMonth(parseISO(d.data), now));
+    const total = currentMonthExpenses.reduce((sum, d) => sum + d.valor, 0);
+
+    const grouped = currentMonthExpenses.reduce((acc, curr) => {
+      acc[curr.categoria] = (acc[curr.categoria] || 0) + curr.valor;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return Object.entries(grouped)
+      .map(([name, value]) => ({
+        name,
+        value,
+        percent: total > 0 ? value / total : 0
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [despesas]);
 
   const alertasAtraso = useMemo(() => {
     const pAtrasados = plantoes
@@ -110,6 +147,7 @@ const DashboardPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Fluxo de Caixa */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa</h2>
           <ResponsiveContainer width="100%" height={300}>
@@ -128,6 +166,7 @@ const DashboardPage: React.FC = () => {
           </ResponsiveContainer>
         </div>
         
+        {/* Alertas de Atraso */}
         <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Alertas de Atraso</h2>
           <div className="space-y-3">
@@ -158,6 +197,84 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Novo Gráfico de Despesas por Categoria */}
+      <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
+          <div className="flex justify-between items-center mb-6">
+             <h2 className="text-lg font-bold text-slate-800">Despesas por Categoria</h2>
+             <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                {format(new Date(), 'MMMM yyyy', { locale: ptBR })}
+             </span>
+          </div>
+
+          {expensesByCategory.length === 0 ? (
+             <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                <p>Nenhuma despesa registrada neste mês.</p>
+             </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+               {/* Lista de Categorias (Lado Esquerdo - 3/5) */}
+               <div className="lg:col-span-3 overflow-y-auto max-h-[350px] pr-2">
+                  <ul className="space-y-4">
+                     {expensesByCategory.map((category, index) => (
+                        <li key={category.name} className="flex items-center justify-between group p-2 hover:bg-slate-50 rounded-lg transition-colors">
+                           <div className="flex items-center space-x-4">
+                              <div 
+                                className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm"
+                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                              >
+                                {getCategoryIcon(category.name)}
+                              </div>
+                              <span className="font-medium text-slate-700">{category.name}</span>
+                           </div>
+                           <div className="text-right">
+                              <p className="font-bold text-slate-800">{formatCurrency(category.value)}</p>
+                              <p className="text-xs text-slate-500">{formatPercent(category.percent)}</p>
+                           </div>
+                        </li>
+                     ))}
+                     <li className="pt-4 mt-2 border-t border-slate-100 flex justify-end">
+                        <div className="text-right">
+                           <span className="text-xs text-slate-400 uppercase font-semibold mr-2">Total</span>
+                           <span className="text-xl font-bold text-slate-900">{formatCurrency(thisMonthMetrics.despesasMes)}</span>
+                        </div>
+                     </li>
+                  </ul>
+               </div>
+
+               {/* Gráfico de Rosca (Lado Direito - 2/5) */}
+               <div className="lg:col-span-2 h-[300px] relative flex justify-center items-center">
+                   <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                         <Pie
+                            data={expensesByCategory}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={85}
+                            paddingAngle={5}
+                            dataKey="value"
+                            stroke="none"
+                         >
+                            {expensesByCategory.map((entry, index) => (
+                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                         </Pie>
+                         <Tooltip 
+                            formatter={(value: number) => formatCurrency(value)}
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                         />
+                      </PieChart>
+                   </ResponsiveContainer>
+                   {/* Center Text Trick */}
+                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-xs text-slate-400 font-medium uppercase">Total</span>
+                      <span className="text-lg font-bold text-slate-800">{formatCurrency(thisMonthMetrics.despesasMes)}</span>
+                   </div>
+               </div>
+            </div>
+          )}
+      </div>
     </div>
   );
 };
@@ -168,5 +285,15 @@ const CashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const TrendingDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>;
 const ScaleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
+
+// Category Icons
+const BusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>; // Generic transport replacement
+const ShoppingCartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>;
+const HomeIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>;
+const HeartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>;
+const SmileIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const AcademicCapIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M12 14l9-5-9-5-9 5 9 5z" /><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222" /></svg>;
+const ShoppingBagIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>;
+const TagIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>;
 
 export default DashboardPage;
