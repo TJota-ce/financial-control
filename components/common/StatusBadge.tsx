@@ -9,14 +9,14 @@ interface StatusBadgeProps {
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
   const statusClasses: Record<Status, string> = {
-    'Recebido': 'bg-green-100 text-green-800',
-    'A Receber': 'bg-yellow-100 text-yellow-800',
-    'Atrasado': 'bg-red-100 text-red-800',
-    'Cancelado': 'bg-gray-100 text-gray-800',
+    'Recebido': 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20',
+    'A Receber': 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20',
+    'Atrasado': 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/10',
+    'Cancelado': 'bg-slate-50 text-slate-600 ring-1 ring-inset ring-slate-500/10',
   };
 
   return (
-    <span className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${statusClasses[status]}`}>
+    <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${statusClasses[status]}`}>
       {status}
     </span>
   );

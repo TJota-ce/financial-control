@@ -53,24 +53,31 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center p-4 font-sans">
       <div className="max-w-md w-full mx-auto">
-        <h1 className="text-4xl font-bold text-center text-primary mb-6">
-          MedFin
-        </h1>
-        <div className="bg-white p-8 rounded-xl shadow-md space-y-6">
-          <h2 className="text-2xl font-semibold text-gray-700 text-center">
-            {isSignUp ? 'Criar Nova Conta' : 'Acessar sua Conta'}
+        <div className="flex flex-col items-center mb-8">
+            <div className="bg-gradient-to-br from-primary to-secondary p-4 rounded-2xl shadow-xl shadow-primary/20 mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+            </div>
+            <h1 className="text-4xl font-bold text-slate-800 tracking-tight">Shifts</h1>
+            <p className="text-slate-500 font-medium tracking-wide">Gestão Financeira para Médicos</p>
+        </div>
+
+        <div className="bg-white p-8 rounded-2xl shadow-soft border border-slate-100 space-y-6">
+          <h2 className="text-2xl font-bold text-slate-800 text-center">
+            {isSignUp ? 'Criar Nova Conta' : 'Acessar Plataforma'}
           </h2>
 
           {errorMsg && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative text-sm">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-lg relative text-sm">
               {errorMsg}
             </div>
           )}
 
           {successMsg && (
-            <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative text-sm">
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 rounded-lg relative text-sm">
               {successMsg}
             </div>
           )}
@@ -79,64 +86,64 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
             {isSignUp && (
                <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Nome Completo</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Nome Completo</label>
                   <input
                     type="text"
                     value={nome}
                     onChange={(e) => setNome(e.target.value)}
                     placeholder="Seu nome"
                     required
-                    className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:ring-primary focus:border-primary"
+                    className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none bg-white text-slate-900"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">CRM</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">CRM</label>
                   <input
                     type="text"
                     value={crm}
                     onChange={(e) => setCrm(e.target.value)}
                     placeholder="123456-SP"
                     required
-                    className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:ring-primary focus:border-primary"
+                    className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none bg-white text-slate-900"
                   />
                 </div>
                </>
             )}
             <div>
-              <label className="block text-sm font-medium text-gray-700">Email</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="seu@email.com"
-                className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:ring-primary focus:border-primary"
+                className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none bg-white text-slate-900"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Senha</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Senha</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                placeholder="******"
-                className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:ring-primary focus:border-primary"
+                placeholder="••••••"
+                className="block w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all outline-none bg-white text-slate-900"
               />
             </div>
             
-            <div>
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors disabled:opacity-50 flex justify-center items-center"
+                className="w-full bg-primary text-white font-bold py-2.5 px-4 rounded-xl hover:bg-primary-dark shadow-lg shadow-primary/30 transition-all disabled:opacity-50 flex justify-center items-center transform active:scale-95"
               >
                 {loading && <SpinnerIcon />}
-                {loading ? 'Processando...' : (isSignUp ? 'Cadastrar' : 'Entrar')}
+                {loading ? 'Processando...' : (isSignUp ? 'Criar Conta' : 'Entrar')}
               </button>
             </div>
           </form>
-          <p className="text-sm text-center text-gray-600">
+          <div className="text-sm text-center text-slate-500">
             {isSignUp ? 'Já tem uma conta?' : 'Não tem uma conta?'}
             <button
               onClick={() => {
@@ -144,11 +151,11 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
                 setErrorMsg(null);
                 setSuccessMsg(null);
               }}
-              className="font-medium text-primary hover:underline ml-1"
+              className="font-bold text-primary hover:text-primary-dark ml-1 transition-colors"
             >
               {isSignUp ? 'Faça login' : 'Cadastre-se'}
             </button>
-          </p>
+          </div>
         </div>
       </div>
     </div>

@@ -18,7 +18,6 @@ const LoadingSpinner: React.FC = () => (
 );
 
 const DashboardPage: React.FC = () => {
-  // Utiliza getUpdatedRecebiveis para garantir que o status de atraso esteja calculado corretamente
   const { getUpdatedPlantoes, getUpdatedRecebiveis, despesas, loading } = useFinance();
   const plantoes = getUpdatedPlantoes();
   const recebiveis = getUpdatedRecebiveis();
@@ -45,20 +44,16 @@ const DashboardPage: React.FC = () => {
   const chartData = useMemo(() => {
     const dataPoints = [];
     const today = new Date();
-    // Começa 2 meses atrás
     const startDate = subMonths(today, 2);
 
-    // Gera 6 pontos no total: -2, -1, 0 (atual), +1, +2, +3
     for (let i = 0; i < 6; i++) {
       const date = addMonths(startDate, i);
       const mes = format(date, 'MMM', { locale: ptBR });
       
-      // Recebido: Soma Plantões + Recebíveis com status 'Recebido' na data real do recebimento
       const recebido = [...plantoes, ...recebiveis]
         .filter(p => p.status === 'Recebido' && p.data_recebida && getMonth(parseISO(p.data_recebida)) === getMonth(date) && getYear(parseISO(p.data_recebida)) === getYear(date) )
         .reduce((sum, p) => sum + p.valor, 0);
 
-      // Previsão: Soma Plantões + Recebíveis baseados na data PREVISTA (independente se já pagou ou não)
       const previsto = [...plantoes, ...recebiveis]
         .filter(p => getMonth(parseISO(p.data_prevista)) === getMonth(date) && getYear(parseISO(p.data_prevista)) === getYear(date))
         .reduce((sum, p) => sum + p.valor, 0);
@@ -68,7 +63,6 @@ const DashboardPage: React.FC = () => {
     return dataPoints;
   }, [plantoes, recebiveis]);
 
-  // Unifica Plantões e Recebíveis atrasados para exibição no alerta
   const alertasAtraso = useMemo(() => {
     const pAtrasados = plantoes
       .filter(p => p.status === 'Atrasado')
@@ -92,10 +86,9 @@ const DashboardPage: React.FC = () => {
         tipo: 'Recebível'
       }));
 
-    // Junta as listas e ordena pela data prevista (mais antigo primeiro)
     return [...pAtrasados, ...rAtrasados]
       .sort((a, b) => new Date(a.data_prevista).getTime() - new Date(b.data_prevista).getTime())
-      .slice(0, 5); // Pega apenas os 5 primeiros
+      .slice(0, 5);
   }, [plantoes, recebiveis]);
   
   if (loading && plantoes.length === 0) {
@@ -103,50 +96,65 @@ const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8">
-      <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
+    <div className="space-y-8 animate-fade-in">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Visão Geral</h1>
+        <p className="text-sm text-slate-500">{format(new Date(), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+      </div>
       
-      {/* Cards de Métricas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard title="Total a Receber (Mês)" value={formatCurrency(thisMonthMetrics.aReceber)} icon={<CashIcon />} colorClass={`border-red-500`} />
-        <MetricCard title="Total Recebido (Mês)" value={formatCurrency(thisMonthMetrics.recebido)} icon={<CheckCircleIcon />} colorClass="border-green-500" />
-        <MetricCard title="Despesas (Mês)" value={formatCurrency(thisMonthMetrics.despesasMes)} icon={<TrendingDownIcon />} colorClass="border-yellow-500" />
-        <MetricCard title="Saldo (Mês)" value={formatCurrency(thisMonthMetrics.saldo)} icon={<ScaleIcon />} colorClass="border-sky-500" />
+        <MetricCard title="A Receber (Mês)" value={formatCurrency(thisMonthMetrics.aReceber)} icon={<CashIcon />} colorClass="text-amber-500" />
+        <MetricCard title="Recebido (Mês)" value={formatCurrency(thisMonthMetrics.recebido)} icon={<CheckCircleIcon />} colorClass="text-emerald-500" />
+        <MetricCard title="Despesas (Mês)" value={formatCurrency(thisMonthMetrics.despesasMes)} icon={<TrendingDownIcon />} colorClass="text-rose-500" />
+        <MetricCard title="Saldo Líquido" value={formatCurrency(thisMonthMetrics.saldo)} icon={<ScaleIcon />} colorClass="text-primary" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Gráfico */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Recebimentos vs Previsão (Últimos 2 meses + Próximos 3)</h2>
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa</h2>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis tickFormatter={(value) => `R$${Number(value) / 1000}k`} />
-              <Tooltip formatter={(value: number) => formatCurrency(value)} />
-              <Legend />
-              <Line type="monotone" dataKey="Previsão" stroke="#f59e0b" strokeWidth={2} />
-              <Line type="monotone" dataKey="Recebido" stroke="#10b981" strokeWidth={2} />
+            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} tickFormatter={(value) => `R$${Number(value) / 1000}k`} />
+              <Tooltip 
+                contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                formatter={(value: number) => [formatCurrency(value), '']}
+              />
+              <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
+              <Line type="monotone" name="Previsão" dataKey="Previsão" stroke="#A78BFA" strokeWidth={3} dot={{r: 4, fill: '#A78BFA', strokeWidth: 2, stroke:'#fff'}} activeDot={{r: 6}} strokeDasharray="5 5" />
+              <Line type="monotone" name="Recebido" dataKey="Recebido" stroke="#4F46E5" strokeWidth={3} dot={{r: 4, fill: '#4F46E5', strokeWidth: 2, stroke:'#fff'}} activeDot={{r: 6}} />
             </LineChart>
           </ResponsiveContainer>
         </div>
         
-        {/* Alertas de Atraso */}
-        <div className="bg-white p-6 rounded-xl shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Alertas de Atraso</h2>
-          <div className="space-y-4">
+        <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Alertas de Atraso</h2>
+          <div className="space-y-3">
             {alertasAtraso.length > 0 ? alertasAtraso.map(item => (
-              <div key={item.id} className="bg-red-50 border border-red-200 p-3 rounded-lg">
-                <div className="flex justify-between items-center">
+              <div key={item.id} className="bg-rose-50 border border-rose-100 p-3 rounded-xl flex flex-col gap-2">
+                <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-semibold text-red-800">{item.titulo}</p>
-                    <span className="text-xs font-medium text-red-600 bg-red-100 px-1 rounded border border-red-200">{item.tipo}</span>
+                    <p className="font-semibold text-rose-900 text-sm">{item.titulo}</p>
+                    <p className="text-xs text-rose-700 mt-0.5">{item.tipo}</p>
                   </div>
-                  <StatusBadge status={item.status} />
+                  <div className="bg-white px-2 py-0.5 rounded text-[10px] font-bold text-rose-600 shadow-sm">
+                    ATRASADO
+                  </div>
                 </div>
-                <p className="text-sm text-red-600 mt-1">{formatCurrency(item.valor)} - Previsto para {format(parseISO(item.data_prevista), 'dd/MM/yyyy')}</p>
+                <div className="flex justify-between items-end border-t border-rose-100 pt-2 mt-1">
+                     <p className="text-xs text-rose-600">Previsto: {format(parseISO(item.data_prevista), 'dd/MM/yyyy')}</p>
+                     <p className="font-bold text-rose-800 text-sm">{formatCurrency(item.valor)}</p>
+                </div>
               </div>
-            )) : <p className="text-gray-500">Nenhum pagamento atrasado.</p>}
+            )) : (
+              <div className="flex flex-col items-center justify-center h-48 text-center text-slate-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm">Nenhum pagamento atrasado.</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -156,7 +164,7 @@ const DashboardPage: React.FC = () => {
 
 
 // Icons
-const CashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" /></svg>;
+const CashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const TrendingDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>;
 const ScaleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
