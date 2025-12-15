@@ -166,7 +166,7 @@ const ConfiguracoesPage: React.FC = () => {
         case 'perfil':
             return (
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">Perfil do Médico</h2>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">Perfil</h2>
                   <form onSubmit={handleUserFormSubmit} className="space-y-4">
                       <div>
                       <label className="block text-sm font-medium text-gray-700">Nome</label>
@@ -190,12 +190,26 @@ const ConfiguracoesPage: React.FC = () => {
             return (
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">Hospitais</h2>
-                  <div className="flex gap-2 mb-4">
-                      <input type="text" value={newHospital} onChange={e => setNewHospital(e.target.value)} placeholder="Novo hospital" className="flex-grow p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
-                      <button onClick={handleAddHospital} className="bg-secondary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary-dark transition-colors">Adicionar</button>
+                  
+                  {/* Formulário de Adição Responsivo */}
+                  <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                      <input 
+                        type="text" 
+                        value={newHospital} 
+                        onChange={e => setNewHospital(e.target.value)} 
+                        placeholder="Novo hospital" 
+                        className="flex-grow p-2.5 border border-gray-300 rounded-lg shadow-sm bg-white text-gray-900 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" 
+                      />
+                      <button 
+                        onClick={handleAddHospital} 
+                        className="bg-secondary text-white font-bold py-2.5 px-6 rounded-lg hover:bg-secondary-dark transition-colors w-full sm:w-auto"
+                      >
+                        Adicionar
+                      </button>
                   </div>
-                  <ul className="space-y-2 max-h-96 overflow-y-auto">
-                      {hospitals.length === 0 && <p className="text-gray-500 text-sm">Nenhum hospital cadastrado.</p>}
+
+                  <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                      {hospitals.length === 0 && <p className="text-gray-500 text-sm italic">Nenhum hospital cadastrado.</p>}
                       {hospitals.map(h => (
                       <li key={h.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-md border border-gray-200">
                           {editingItem?.type === 'hospital' && editingItem.id === h.id ? (
@@ -204,7 +218,7 @@ const ConfiguracoesPage: React.FC = () => {
                                     type="text" 
                                     value={editingItem.text} 
                                     onChange={(e) => setEditingItem({ ...editingItem, text: e.target.value })} 
-                                    className="flex-grow p-1 border border-blue-300 rounded text-sm bg-white text-gray-900"
+                                    className="flex-grow p-2 border border-blue-300 rounded text-sm bg-white text-gray-900"
                                     autoFocus
                                   />
                                   <button onClick={saveEditingHospital} className="text-green-600 hover:text-green-800 p-1" title="Salvar">
@@ -216,12 +230,12 @@ const ConfiguracoesPage: React.FC = () => {
                               </div>
                           ) : (
                               <>
-                                <span className="text-gray-800">{h.name}</span>
+                                <span className="text-gray-800 font-medium">{h.name}</span>
                                 <div className="flex gap-2">
-                                    <button onClick={() => startEditingHospital(h.id, h.name)} className="text-blue-500 hover:text-blue-700 p-1 hover:bg-blue-50 rounded" title="Editar">
+                                    <button onClick={() => startEditingHospital(h.id, h.name)} className="text-blue-500 hover:text-blue-700 p-1.5 hover:bg-blue-50 rounded transition-colors" title="Editar">
                                         <PencilIcon />
                                     </button>
-                                    <button onClick={() => handleRemoveHospital(h.id)} className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded" title="Remover">
+                                    <button onClick={() => handleRemoveHospital(h.id)} className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded transition-colors" title="Remover">
                                         <TrashIcon/>
                                     </button>
                                 </div>
@@ -235,13 +249,27 @@ const ConfiguracoesPage: React.FC = () => {
         case 'categorias':
             return (
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">Categorias de Despesa</h2>
-                  <div className="flex gap-2 mb-4">
-                      <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Nova categoria" className="flex-grow p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
-                      <button onClick={handleAddCategory} className="bg-secondary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary-dark transition-colors">Adicionar</button>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">Categorias</h2>
+                  
+                  {/* Formulário de Adição Responsivo */}
+                  <div className="flex flex-col sm:flex-row gap-3 mb-6">
+                      <input 
+                        type="text" 
+                        value={newCategory} 
+                        onChange={e => setNewCategory(e.target.value)} 
+                        placeholder="Nova categoria" 
+                        className="flex-grow p-2.5 border border-gray-300 rounded-lg shadow-sm bg-white text-gray-900 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" 
+                      />
+                      <button 
+                        onClick={handleAddCategory} 
+                        className="bg-secondary text-white font-bold py-2.5 px-6 rounded-lg hover:bg-secondary-dark transition-colors w-full sm:w-auto"
+                      >
+                        Adicionar
+                      </button>
                   </div>
-                  <ul className="space-y-2 max-h-96 overflow-y-auto">
-                       {categories.length === 0 && <p className="text-gray-500 text-sm">Nenhuma categoria cadastrada.</p>}
+
+                  <ul className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                       {categories.length === 0 && <p className="text-gray-500 text-sm italic">Nenhuma categoria cadastrada.</p>}
                       {categories.map(c => (
                       <li key={c.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-md border border-gray-200">
                           {editingItem?.type === 'category' && editingItem.id === c.id ? (
@@ -250,7 +278,7 @@ const ConfiguracoesPage: React.FC = () => {
                                     type="text" 
                                     value={editingItem.text} 
                                     onChange={(e) => setEditingItem({ ...editingItem, text: e.target.value })} 
-                                    className="flex-grow p-1 border border-blue-300 rounded text-sm bg-white text-gray-900"
+                                    className="flex-grow p-2 border border-blue-300 rounded text-sm bg-white text-gray-900"
                                     autoFocus
                                   />
                                   <button onClick={saveEditingCategory} className="text-green-600 hover:text-green-800 p-1" title="Salvar">
@@ -262,12 +290,12 @@ const ConfiguracoesPage: React.FC = () => {
                               </div>
                           ) : (
                               <>
-                                <span className="text-gray-800">{c.name}</span>
+                                <span className="text-gray-800 font-medium">{c.name}</span>
                                 <div className="flex gap-2">
-                                    <button onClick={() => startEditingCategory(c.id, c.name)} className="text-blue-500 hover:text-blue-700 p-1 hover:bg-blue-50 rounded" title="Editar">
+                                    <button onClick={() => startEditingCategory(c.id, c.name)} className="text-blue-500 hover:text-blue-700 p-1.5 hover:bg-blue-50 rounded transition-colors" title="Editar">
                                         <PencilIcon />
                                     </button>
-                                    <button onClick={() => handleRemoveCategory(c.id)} className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded" title="Remover">
+                                    <button onClick={() => handleRemoveCategory(c.id)} className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded transition-colors" title="Remover">
                                         <TrashIcon/>
                                     </button>
                                 </div>
@@ -296,7 +324,7 @@ const ConfiguracoesPage: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
           >
-            Perfil do Médico
+            Perfil
           </button>
           <button
             onClick={() => setActiveTab('hospitais')}
@@ -316,7 +344,7 @@ const ConfiguracoesPage: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
           >
-            Categorias de Despesa
+            Categorias
           </button>
         </nav>
       </div>
