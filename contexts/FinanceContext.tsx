@@ -221,10 +221,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
+    // Procura o nome do hospital para preencher o campo 'hospital' caso o banco exija (constraint not-null)
+    const hospitalName = hospitals.find(h => h.id === plantaoData.hospital_id)?.name || 'Hospital';
+
     const basePlantao = {
       ...plantaoData,
       user_id: user.id,
-      status: plantaoData.status || 'A Receber' 
+      status: plantaoData.status || 'A Receber',
+      hospital: hospitalName // Preenche o campo de texto para evitar erro de constraint
     };
 
     let payload = [];
@@ -271,12 +275,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
+    // Procura o nome da categoria para preencher o campo 'categoria' caso o banco exija (constraint not-null)
+    const categoryName = categories.find(c => c.id === despesaData.category_id)?.name || 'Despesa';
+
     // Define status default e data de pagamento
     const newDespesa = { 
         ...despesaData, 
         user_id: user.id,
         status: despesaData.status || 'A Pagar',
-        data_pagamento: despesaData.status === 'Pago' ? (despesaData.data_pagamento || despesaData.data) : null
+        data_pagamento: despesaData.status === 'Pago' ? (despesaData.data_pagamento || despesaData.data) : null,
+        categoria: categoryName // Preenche o campo de texto para evitar erro de constraint
     };
     
     let payload = [];

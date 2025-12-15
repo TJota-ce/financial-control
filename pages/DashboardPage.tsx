@@ -4,7 +4,7 @@ import { useFinance } from '../contexts/FinanceContext';
 import MetricCard from '../components/dashboard/MetricCard';
 import { format, getMonth, getYear, isSameMonth, parseISO, subMonths, addMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -190,18 +190,19 @@ const DashboardPage: React.FC = () => {
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa (Semestral)</h2>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+            <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} dy={10} />
               <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748B', fontSize: 12}} tickFormatter={(value) => `R$${Number(value) / 1000}k`} />
               <Tooltip 
+                cursor={{fill: '#F1F5F9'}}
                 contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
                 formatter={(value: number) => [formatCurrency(value), '']}
               />
               <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px' }} />
-              <Line type="monotone" name="Previsão" dataKey="Previsão" stroke="#A78BFA" strokeWidth={3} dot={{r: 4, fill: '#A78BFA', strokeWidth: 2, stroke:'#fff'}} activeDot={{r: 6}} strokeDasharray="5 5" />
-              <Line type="monotone" name="Recebido" dataKey="Recebido" stroke="#4F46E5" strokeWidth={3} dot={{r: 4, fill: '#4F46E5', strokeWidth: 2, stroke:'#fff'}} activeDot={{r: 6}} />
-            </LineChart>
+              <Bar name="Previsão" dataKey="Previsão" fill="#A78BFA" radius={[4, 4, 0, 0]} maxBarSize={30} />
+              <Bar name="Recebido" dataKey="Recebido" fill="#4F46E5" radius={[4, 4, 0, 0]} maxBarSize={30} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
         

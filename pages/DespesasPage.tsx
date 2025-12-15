@@ -409,6 +409,7 @@ const DespesasPage: React.FC = () => {
                         onChange={(e) => setRecurrenceEnd(e.target.value)}
                         className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" 
                       />
+                      <p className="text-xs text-gray-500 mt-1">Se não informada, será gerado por 12 meses</p>
                     </div>
                  </div>
                )}
