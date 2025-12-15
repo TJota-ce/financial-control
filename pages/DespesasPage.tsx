@@ -9,6 +9,15 @@ import { ptBR } from 'date-fns/locale';
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const formatDate = (dateString: string) => format(parseISO(dateString), 'dd/MM/yyyy');
 
+const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
+    const isPaid = status === 'Pago';
+    return (
+        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${isPaid ? 'bg-rose-100 text-rose-800' : 'bg-yellow-100 text-yellow-800'}`}>
+            {status}
+        </span>
+    );
+}
+
 const LoadingSpinner: React.FC = () => (
   <div className="flex justify-center items-center h-64">
     <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div>
@@ -35,21 +44,23 @@ const DespesasPage: React.FC = () => {
   const [isRecurrent, setIsRecurrent] = useState(false);
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceOptions['frequency']>('Mensal');
   const [recurrenceEnd, setRecurrenceEnd] = useState('');
+  
+  // Local state for modal logic
+  const [selectedStatus, setSelectedStatus] = useState<"Pago" | "A Pagar">('A Pagar');
 
   const filteredDespesas = useMemo(() => {
     return despesas
-      .filter(d => isSameMonth(parseISO(d.data), currentMonth)) // Filter by current view month
+      .filter(d => isSameMonth(parseISO(d.data), currentMonth)) // Filter by current view month based on Due Date
       .filter(d => searchTerm === '' || d.descricao.toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(d => categoryFilter === 'Todas' || d.categoria === categoryFilter)
       .sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()); // Sort Ascending: Oldest to Newest
   }, [despesas, searchTerm, categoryFilter, currentMonth]);
   
   const totalDespesasMes = useMemo(() => {
-      // Calculate total for the VIEWED month, not strictly current calendar month
-      return despesas
-        .filter(d => isSameMonth(parseISO(d.data), currentMonth))
-        .reduce((sum, d) => sum + d.valor, 0);
-  }, [despesas, currentMonth]);
+      // Show total "To Pay" (Vencimento) for the month view OR Total "Paid" in this month?
+      // Usually in the expense management screen, we sum up all liabilities for the month.
+      return filteredDespesas.reduce((sum, d) => sum + d.valor, 0);
+  }, [filteredDespesas]);
 
 
   const handleOpenModal = (despesa: Despesa | null = null) => {
@@ -57,6 +68,7 @@ const DespesasPage: React.FC = () => {
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
     setRecurrenceEnd('');
+    setSelectedStatus(despesa?.status || 'A Pagar');
     setIsModalOpen(true);
   };
 
@@ -111,6 +123,17 @@ const DespesasPage: React.FC = () => {
     const valorRaw = formData.get('valor') as string;
     const valorClean = valorRaw ? valorRaw.replace(/\D/g, '') : '';
     const valorFinal = valorClean ? parseFloat(valorClean) / 100 : 0;
+    
+    const categoryId = formData.get('category_id') as string;
+    const status = formData.get('status') as "Pago" | "A Pagar";
+    const dataVencimento = formData.get('data') as string;
+    const dataPagamento = formData.get('data_pagamento') as string;
+
+    if (!categoryId) {
+        alert("Por favor, selecione uma categoria.");
+        setIsSaving(false);
+        return;
+    }
 
     if (isNaN(valorFinal) || valorFinal <= 0) {
         alert("Por favor, insira um valor válido.");
@@ -120,15 +143,17 @@ const DespesasPage: React.FC = () => {
 
     const despesaData = {
       descricao: formData.get('descricao') as string,
-      categoria: formData.get('categoria') as string,
+      category_id: categoryId,
       valor: valorFinal,
-      data: formData.get('data') as string,
-      recorrente: isRecurrent, // Use state instead of form data for consistency with RecurrenceOptions
+      data: dataVencimento,
+      status: status,
+      data_pagamento: status === 'Pago' ? (dataPagamento || dataVencimento) : undefined, // If user didn't fill payment date but marked as paid, fallback to due date
+      recorrente: isRecurrent, 
     };
 
     try {
         if (editingDespesa) {
-          await updateDespesa({ ...editingDespesa, ...despesaData });
+          await updateDespesa({ ...editingDespesa, ...despesaData, categoria: editingDespesa.categoria }); 
         } else {
            const recurrenceOptions: RecurrenceOptions = {
             isRecurrent,
@@ -203,7 +228,7 @@ const DespesasPage: React.FC = () => {
             {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
            <div className="md:col-start-3 flex items-center justify-center md:justify-end bg-yellow-100 text-yellow-800 p-2 rounded-lg">
-             <span className="font-semibold">Total do Mês: {formatCurrency(totalDespesasMes)}</span>
+             <span className="font-semibold">Total Listado: {formatCurrency(totalDespesasMes)}</span>
            </div>
         </div>
       </div>
@@ -221,9 +246,10 @@ const DespesasPage: React.FC = () => {
                 <tr>
                   <th scope="col" className="px-6 py-3">Descrição</th>
                   <th scope="col" className="px-6 py-3">Categoria</th>
-                  <th scope="col" className="px-6 py-3">Data</th>
+                  <th scope="col" className="px-6 py-3">Vencimento</th>
                   <th scope="col" className="px-6 py-3">Valor</th>
-                  <th scope="col" className="px-6 py-3">Recorrência</th>
+                  <th scope="col" className="px-6 py-3">Status</th>
+                  <th scope="col" className="px-6 py-3">Pagamento</th>
                   <th scope="col" className="px-6 py-3 text-center">Ações</th>
                 </tr>
               </thead>
@@ -234,7 +260,10 @@ const DespesasPage: React.FC = () => {
                     <td className="px-6 py-4"><span className="px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-200 rounded-full">{d.categoria}</span></td>
                     <td className="px-6 py-4">{formatDate(d.data)}</td>
                     <td className="px-6 py-4 font-semibold">{formatCurrency(d.valor)}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{d.frequencia || '-'}</td>
+                    <td className="px-6 py-4"><StatusBadge status={d.status || 'A Pagar'} /></td>
+                    <td className="px-6 py-4 text-xs text-gray-500">
+                        {d.data_pagamento ? formatDate(d.data_pagamento) : '-'}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-center space-x-3">
                         <button onClick={() => handleOpenModal(d)} className="text-blue-600 hover:text-blue-800" title="Editar">
@@ -255,7 +284,7 @@ const DespesasPage: React.FC = () => {
                  <div key={d.id} className="bg-white p-4 rounded-lg shadow border border-gray-200 relative">
                    <div className="flex justify-between items-start mb-2 pr-16">
                      <p className="font-bold text-gray-900">{d.descricao}</p>
-                     <span className="px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-200 rounded-full">{d.categoria}</span>
+                     <StatusBadge status={d.status || 'A Pagar'} />
                    </div>
                    <div className="absolute top-4 right-4 flex space-x-2">
                       <button onClick={() => handleOpenModal(d)} className="text-blue-600 hover:text-blue-800">
@@ -267,8 +296,9 @@ const DespesasPage: React.FC = () => {
                    </div>
                    <div className="text-sm text-gray-600 space-y-1">
                       <p><strong>Valor:</strong> {formatCurrency(d.valor)}</p>
-                      <p><strong>Data:</strong> {formatDate(d.data)}</p>
-                      {d.frequencia && <p className="font-semibold text-blue-600">Recorrência: {d.frequencia}</p>}
+                      <p><strong>Vencimento:</strong> {formatDate(d.data)}</p>
+                      {d.status === 'Pago' && <p><strong>Pago em:</strong> {d.data_pagamento ? formatDate(d.data_pagamento) : '-'}</p>}
+                      <span className="px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-200 rounded-full inline-block mt-1">{d.categoria}</span>
                    </div>
                  </div>
               ))}
@@ -287,10 +317,23 @@ const DespesasPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Categoria</label>
-              <input type="text" name="categoria" list="categorias-list" defaultValue={editingDespesa?.categoria || ''} required placeholder="Selecione ou digite" className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
-              <datalist id="categorias-list">
-                  {categories.map(c => <option key={c.id} value={c.name} />)}
-              </datalist>
+              {categories.length === 0 ? (
+                <div className="mt-1 p-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm text-yellow-700">
+                    Cadastre categorias em "Perfil" para adicionar despesas.
+                </div>
+              ) : (
+                <select 
+                    name="category_id" 
+                    defaultValue={editingDespesa?.category_id || ''} 
+                    required 
+                    className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
+                >
+                    <option value="" disabled>Selecione uma categoria</option>
+                    {categories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Valor (R$)</label>
@@ -300,10 +343,32 @@ const DespesasPage: React.FC = () => {
               }} />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Data da Despesa</label>
-            <input type="date" name="data" defaultValue={editingDespesa?.data || todayStr} required className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Data de Vencimento</label>
+                <input type="date" name="data" defaultValue={editingDespesa?.data || todayStr} required className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
+            </div>
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Status</label>
+                <select 
+                    name="status" 
+                    value={selectedStatus} 
+                    onChange={(e) => setSelectedStatus(e.target.value as "Pago" | "A Pagar")}
+                    className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
+                >
+                    <option value="A Pagar">A Pagar</option>
+                    <option value="Pago">Pago</option>
+                </select>
+            </div>
           </div>
+          
+          {selectedStatus === 'Pago' && (
+              <div className="bg-green-50 p-3 rounded-md border border-green-100">
+                  <label className="block text-sm font-medium text-green-800">Data do Pagamento</label>
+                  <input type="date" name="data_pagamento" defaultValue={editingDespesa?.data_pagamento || todayStr} required className="mt-1 block w-full p-2 border border-green-300 rounded-md shadow-sm bg-white text-gray-900" />
+              </div>
+          )}
           
            {/* Recurrence Section - Only on Create */}
           {!editingDespesa && (
@@ -317,7 +382,7 @@ const DespesasPage: React.FC = () => {
                     className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
                   />
                   <label htmlFor="recurrent-desp" className="ml-2 block text-sm text-gray-900">
-                    Repetir esta despesa (Recorrência)
+                    Repetir este despesa (Recorrência)
                   </label>
                </div>
 

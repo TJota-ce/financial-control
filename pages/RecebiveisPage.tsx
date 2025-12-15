@@ -4,7 +4,7 @@ import { useFinance } from '../contexts/FinanceContext';
 import type { RecebivelOutro, RecurrenceOptions } from '../types';
 import StatusBadge from '../components/common/StatusBadge';
 import Modal from '../components/common/Modal';
-import { addDays, format, parseISO, addMonths, subMonths, isSameMonth, startOfMonth, endOfMonth } from 'date-fns';
+import { addDays, format, parseISO, addMonths, subMonths, isSameMonth, startOfMonth, endOfMonth, isBefore, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -39,6 +39,10 @@ const RecebiveisPage: React.FC = () => {
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceOptions['frequency']>('Mensal');
   const [recurrenceEnd, setRecurrenceEnd] = useState('');
 
+  // Local state for modal logic
+  const [selectedStatus, setSelectedStatus] = useState<RecebivelOutro['status']>('A Receber');
+  const [selectedDataPrevista, setSelectedDataPrevista] = useState('');
+
   const filteredRecebiveis = useMemo(() => {
     return allRecebiveis
       .filter(r => isSameMonth(parseISO(r.data), currentMonth)) // Filter by current view month
@@ -46,11 +50,29 @@ const RecebiveisPage: React.FC = () => {
       .filter(r => statusFilter === 'Todos' || r.status === statusFilter);
   }, [allRecebiveis, searchTerm, statusFilter, currentMonth]);
 
+  // Validation Logic for "Atrasado"
+  const isAtrasadoInvalido = useMemo(() => {
+    if (selectedStatus !== 'Atrasado') return false;
+    if (!selectedDataPrevista) return false;
+    
+    const date = parseISO(selectedDataPrevista);
+    const today = startOfDay(new Date());
+    
+    // Se a data for válida e NÃO for antes de hoje (ou seja, é hoje ou futuro), é inválido para "Atrasado"
+    return !isBefore(date, today);
+  }, [selectedStatus, selectedDataPrevista]);
+
   const handleOpenModal = (recebivel: RecebivelOutro | null = null) => {
     setEditingRecebivel(recebivel);
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
     setRecurrenceEnd('');
+    setSelectedStatus(recebivel?.status || 'A Receber');
+    
+    // Initialize date state
+    const defaultDataPrevista = recebivel?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd');
+    setSelectedDataPrevista(defaultDataPrevista);
+    
     setIsModalOpen(true);
   };
 
@@ -127,12 +149,17 @@ const RecebiveisPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    
+    if (isAtrasadoInvalido) return;
+
     setIsSaving(true);
     const formData = new FormData(e.currentTarget);
     const dataInput = formData.get('data') as string;
     const dataPrevistaInput = formData.get('data_prevista') as string;
+    const dataRecebidaInput = formData.get('data_recebida') as string;
     
-    const formStatus = formData.get('status') as RecebivelOutro['status'];
+    // Extract status from form or state
+    const formStatus = selectedStatus;
     
     const valorRaw = formData.get('valor') as string;
     const valorClean = valorRaw ? valorRaw.replace(/\D/g, '') : '';
@@ -149,7 +176,8 @@ const RecebiveisPage: React.FC = () => {
       data: dataInput,
       valor: valorFinal,
       data_prevista: dataPrevistaInput,
-      status: formStatus
+      status: formStatus,
+      data_recebida: formStatus === 'Recebido' ? (dataRecebidaInput || dataInput) : undefined
     };
     
     try {
@@ -157,6 +185,7 @@ const RecebiveisPage: React.FC = () => {
            await updateRecebivel({
              ...editingRecebivel,
              ...newRecebivelData,
+             data_recebida: formStatus === 'Recebido' ? (dataRecebidaInput || dataInput) : undefined
            });
         } else {
            const recurrenceOptions: RecurrenceOptions = {
@@ -353,17 +382,47 @@ const RecebiveisPage: React.FC = () => {
             </div>
              <div>
                 <label className="block text-sm font-medium text-gray-700">Data Prevista de Pagamento</label>
-                <input type="date" name="data_prevista" required defaultValue={editingRecebivel?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd')} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
+                <input 
+                    type="date" 
+                    name="data_prevista" 
+                    required 
+                    value={selectedDataPrevista} 
+                    onChange={(e) => setSelectedDataPrevista(e.target.value)}
+                    className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" 
+                />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Status</label>
-            <select name="status" defaultValue={editingRecebivel?.status || 'A Receber'} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900">
+            <select 
+              name="status" 
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value as RecebivelOutro['status'])}
+              className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
+            >
               <option value="A Receber">A Receber</option>
-              <option value="Recebido">Pago</option>
+              <option value="Recebido">Recebido</option>
               <option value="Atrasado">Atrasado</option>
             </select>
           </div>
+            
+          {isAtrasadoInvalido && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-600 flex items-start gap-2 animate-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>
+                    Para definir o status como <strong>Atrasado</strong>, a data prevista deve ser anterior ao dia de hoje.
+                </span>
+            </div>
+          )}
+
+          {selectedStatus === 'Recebido' && (
+              <div className="bg-green-50 p-3 rounded-md border border-green-100">
+                  <label className="block text-sm font-medium text-green-800">Data do Recebimento</label>
+                  <input type="date" name="data_recebida" defaultValue={editingRecebivel?.data_recebida || todayStr} required className="mt-1 block w-full p-2 border border-green-300 rounded-md shadow-sm bg-white text-gray-900" />
+              </div>
+          )}
           
            {/* Recurrence Section - Only on Create */}
           {!editingRecebivel && (
@@ -412,7 +471,7 @@ const RecebiveisPage: React.FC = () => {
 
           <div className="flex justify-end pt-4">
             <button type="button" onClick={handleCloseModal} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300">Cancelar</button>
-            <button type="submit" disabled={isSaving} className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark disabled:opacity-50">
+            <button type="submit" disabled={isSaving || isAtrasadoInvalido} className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark disabled:opacity-50">
                 {isSaving ? 'Salvando...' : 'Salvar'}
             </button>
           </div>

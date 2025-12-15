@@ -19,7 +19,9 @@ import {
   subMonths, 
   addWeeks, 
   subWeeks,
-  isToday
+  isToday,
+  isBefore,
+  startOfDay
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -61,11 +63,27 @@ const PlantaoPage: React.FC = () => {
   const [recurrenceFreq, setRecurrenceFreq] = useState<RecurrenceOptions['frequency']>('Mensal');
   const [recurrenceEnd, setRecurrenceEnd] = useState('');
 
+  // Local state for modal logic
+  const [selectedStatus, setSelectedStatus] = useState<Plantao['status']>('A Receber');
+  const [selectedDataPrevista, setSelectedDataPrevista] = useState('');
+
   const filteredPlantoes = useMemo(() => {
     return allPlantoes
       .filter(p => searchTerm === '' || p.hospital.toLowerCase().includes(searchTerm.toLowerCase()) || p.tag?.toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(p => statusFilter === 'Todos' || p.status === statusFilter);
   }, [allPlantoes, searchTerm, statusFilter]);
+
+  // Validation Logic for "Atrasado"
+  const isAtrasadoInvalido = useMemo(() => {
+    if (selectedStatus !== 'Atrasado') return false;
+    if (!selectedDataPrevista) return false;
+    
+    const date = parseISO(selectedDataPrevista);
+    const today = startOfDay(new Date());
+    
+    // Se a data for válida e NÃO for antes de hoje (ou seja, é hoje ou futuro), é inválido para "Atrasado"
+    return !isBefore(date, today);
+  }, [selectedStatus, selectedDataPrevista]);
 
   // Calendar Helpers
   const calendarDays = useMemo(() => {
@@ -115,6 +133,12 @@ const PlantaoPage: React.FC = () => {
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
     setRecurrenceEnd('');
+    setSelectedStatus(plantao?.status || 'A Receber');
+    
+    // Initialize date state
+    const defaultDataPrevista = plantao?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd');
+    setSelectedDataPrevista(defaultDataPrevista);
+    
     setIsModalOpen(true);
   };
 
@@ -189,15 +213,29 @@ const PlantaoPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    
+    if (isAtrasadoInvalido) return;
+
     setIsSaving(true);
     const formData = new FormData(e.currentTarget);
     
-    // Extract status from form
-    const formStatus = formData.get('status') as Plantao['status'];
+    // Extract status from form or state
+    const formStatus = selectedStatus;
+    const hospitalId = formData.get('hospital_id') as string;
     
     const valorRaw = formData.get('valor') as string;
     const valorClean = valorRaw ? valorRaw.replace(/\D/g, '') : '';
     const valorFinal = valorClean ? parseFloat(valorClean) / 100 : 0;
+    
+    const dataPlantao = formData.get('data') as string;
+    const dataRecebida = formData.get('data_recebida') as string;
+    const dataPrevista = formData.get('data_prevista') as string;
+
+    if (!hospitalId) {
+        alert("Por favor, selecione um hospital.");
+        setIsSaving(false);
+        return;
+    }
 
     if (isNaN(valorFinal) || valorFinal <= 0) {
         alert("Por favor, insira um valor válido.");
@@ -205,12 +243,14 @@ const PlantaoPage: React.FC = () => {
         return;
     }
 
-    const newPlantaoData = {
-      hospital: formData.get('hospital') as string,
-      data: formData.get('data') as string,
+    const basePlantaoData = {
+      hospital_id: hospitalId,
+      data: dataPlantao,
       valor: valorFinal,
-      data_prevista: formData.get('data_prevista') as string,
+      data_prevista: dataPrevista,
       status: formStatus,
+      // Se status for Recebido, usa a data informada ou fallback para data do plantão. Se não, nulo.
+      data_recebida: formStatus === 'Recebido' ? (dataRecebida || dataPlantao) : undefined,
       tag: formData.get('tag') as string
     };
     
@@ -218,7 +258,9 @@ const PlantaoPage: React.FC = () => {
         if (editingPlantao) {
            await updatePlantao({
              ...editingPlantao,
-             ...newPlantaoData,
+             ...basePlantaoData,
+             data_recebida: formStatus === 'Recebido' ? (dataRecebida || dataPlantao) : undefined, // Explicit undefined for update to clear if needed
+             hospital: editingPlantao.hospital // Keep display name for now until refetch
            });
         } else {
           const recurrenceOptions: RecurrenceOptions = {
@@ -226,7 +268,7 @@ const PlantaoPage: React.FC = () => {
             frequency: recurrenceFreq,
             endDate: recurrenceEnd || undefined
           };
-          await addPlantao(newPlantaoData, recurrenceOptions);
+          await addPlantao(basePlantaoData, recurrenceOptions);
         }
         handleCloseModal();
     } catch (error: any) {
@@ -507,18 +549,23 @@ const PlantaoPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Hospital</label>
-            <input 
-              type="text" 
-              name="hospital" 
-              list="hospitais-list"
-              defaultValue={editingPlantao?.hospital || ''} 
-              required 
-              placeholder="Digite ou selecione o hospital"
-              className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
-            />
-            <datalist id="hospitais-list">
-               {hospitals.map(h => <option key={h.id} value={h.name} />)}
-            </datalist>
+            {hospitals.length === 0 ? (
+                <div className="mt-1 p-2 border border-yellow-300 bg-yellow-50 rounded-md text-sm text-yellow-700">
+                    Você precisa cadastrar um hospital no menu "Perfil" antes de adicionar um plantão.
+                </div>
+            ) : (
+                <select 
+                name="hospital_id" 
+                defaultValue={editingPlantao?.hospital_id || ''} 
+                required 
+                className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
+                >
+                <option value="" disabled>Selecione um hospital</option>
+                {hospitals.map(h => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+                </select>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Tag (Opcional - Responsável/Repasse)</label>
@@ -537,7 +584,14 @@ const PlantaoPage: React.FC = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Data Prevista de Pagamento</label>
-              <input type="date" name="data_prevista" required defaultValue={editingPlantao?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd')} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" />
+              <input 
+                type="date" 
+                name="data_prevista" 
+                required 
+                value={selectedDataPrevista} 
+                onChange={(e) => setSelectedDataPrevista(e.target.value)}
+                className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900" 
+              />
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -557,14 +611,37 @@ const PlantaoPage: React.FC = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Status</label>
-              <select name="status" defaultValue={editingPlantao?.status || 'A Receber'} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900">
+              <select 
+                name="status" 
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value as Plantao['status'])}
+                className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900"
+              >
                 <option value="A Receber">A Receber</option>
-                <option value="Recebido">Pago</option>
+                <option value="Recebido">Recebido</option>
                 <option value="Atrasado">Atrasado</option>
                 <option value="Cancelado">Cancelado</option>
               </select>
             </div>
           </div>
+            
+          {isAtrasadoInvalido && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-600 flex items-start gap-2 animate-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <span>
+                    Para definir o status como <strong>Atrasado</strong>, a data prevista deve ser anterior ao dia de hoje.
+                </span>
+            </div>
+          )}
+
+          {selectedStatus === 'Recebido' && (
+              <div className="bg-green-50 p-3 rounded-md border border-green-100">
+                  <label className="block text-sm font-medium text-green-800">Data do Recebimento</label>
+                  <input type="date" name="data_recebida" defaultValue={editingPlantao?.data_recebida || todayStr} required className="mt-1 block w-full p-2 border border-green-300 rounded-md shadow-sm bg-white text-gray-900" />
+              </div>
+          )}
 
           {/* Recurrence Section - Only on Create */}
           {!editingPlantao && (
@@ -613,7 +690,7 @@ const PlantaoPage: React.FC = () => {
 
           <div className="flex justify-end pt-4">
             <button type="button" onClick={handleCloseModal} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300">Cancelar</button>
-            <button type="submit" disabled={isSaving} className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark disabled:opacity-50">
+            <button type="submit" disabled={isSaving || isAtrasadoInvalido} className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark disabled:opacity-50">
                 {isSaving ? 'Salvando...' : 'Salvar'}
             </button>
           </div>

@@ -2,7 +2,8 @@
 export interface Plantao {
   id: string;
   user_id: string;
-  hospital: string;
+  hospital_id?: string; // Foreign Key
+  hospital: string; // Display name (from join)
   data: string; // formato "YYYY-MM-DD"
   valor: number;
   data_prevista: string; // formato "YYYY-MM-DD"
@@ -31,10 +32,13 @@ export interface RecebivelOutro {
 export interface Despesa {
   id: string;
   user_id: string;
-  categoria: string;
+  category_id?: string; // Foreign Key
+  categoria: string; // Display name (from join)
   descricao: string;
   valor: number;
-  data: string; // formato "YYYY-MM-DD"
+  data: string; // Data de Vencimento (formato "YYYY-MM-DD")
+  status: "Pago" | "A Pagar"; // Novo campo
+  data_pagamento?: string; // Novo campo (formato "YYYY-MM-DD")
   recorrente?: boolean;
   frequencia?: string;
   data_fim?: string;

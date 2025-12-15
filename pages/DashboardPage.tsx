@@ -1,8 +1,8 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
 import MetricCard from '../components/dashboard/MetricCard';
-import { format, getMonth, getYear, isSameMonth, parseISO, subMonths, addMonths } from 'date-fns';
+import { format, getMonth, getYear, isSameMonth, parseISO, subMonths, addMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
@@ -40,33 +40,44 @@ const DashboardPage: React.FC = () => {
   const plantoes = getUpdatedPlantoes();
   const recebiveis = getUpdatedRecebiveis();
 
+  // Estado para navegação de data
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
+  const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
+  const handleToday = () => setCurrentMonth(new Date());
+
   const thisMonthMetrics = useMemo(() => {
-    const now = new Date();
+    // Usa currentMonth em vez de new Date()
+    const targetDate = currentMonth;
+    
     const aReceber = [...plantoes, ...recebiveis]
-      .filter(p => (p.status === 'A Receber' || p.status === 'Atrasado') && isSameMonth(parseISO(p.data), now))
+      .filter(p => (p.status === 'A Receber' || p.status === 'Atrasado') && isSameMonth(parseISO(p.data), targetDate))
       .reduce((sum, p) => sum + p.valor, 0);
 
     const recebido = [...plantoes, ...recebiveis]
-      .filter(p => p.status === 'Recebido' && p.data_recebida && isSameMonth(parseISO(p.data_recebida), now))
+      .filter(p => p.status === 'Recebido' && p.data_recebida && isSameMonth(parseISO(p.data_recebida), targetDate))
       .reduce((sum, p) => sum + p.valor, 0);
 
+    // Despesas do Mês: Apenas as que estão PAGAS e cuja Data de PAGAMENTO cai no mês selecionado
     const despesasMes = despesas
-      .filter(d => isSameMonth(parseISO(d.data), now))
+      .filter(d => d.status === 'Pago' && d.data_pagamento && isSameMonth(parseISO(d.data_pagamento), targetDate))
       .reduce((sum, d) => sum + d.valor, 0);
       
     const saldo = recebido - despesasMes;
 
     return { aReceber, recebido, despesasMes, saldo };
-  }, [plantoes, recebiveis, despesas]);
+  }, [plantoes, recebiveis, despesas, currentMonth]);
 
   const chartData = useMemo(() => {
     const dataPoints = [];
-    const today = new Date();
-    const startDate = subMonths(today, 2);
+    // Centraliza o gráfico no mês selecionado (ex: 2 meses antes, mês atual, 3 meses depois)
+    const startDate = subMonths(currentMonth, 2);
 
     for (let i = 0; i < 6; i++) {
       const date = addMonths(startDate, i);
       const mes = format(date, 'MMM', { locale: ptBR });
+      const isSelected = isSameMonth(date, currentMonth);
       
       const recebido = [...plantoes, ...recebiveis]
         .filter(p => p.status === 'Recebido' && p.data_recebida && getMonth(parseISO(p.data_recebida)) === getMonth(date) && getYear(parseISO(p.data_recebida)) === getYear(date) )
@@ -76,14 +87,18 @@ const DashboardPage: React.FC = () => {
         .filter(p => getMonth(parseISO(p.data_prevista)) === getMonth(date) && getYear(parseISO(p.data_prevista)) === getYear(date))
         .reduce((sum, p) => sum + p.valor, 0);
         
-      dataPoints.push({ name: mes, Recebido: recebido, Previsão: previsto });
+      dataPoints.push({ name: mes, Recebido: recebido, Previsão: previsto, isSelected });
     }
     return dataPoints;
-  }, [plantoes, recebiveis]);
+  }, [plantoes, recebiveis, currentMonth]);
 
   const expensesByCategory = useMemo(() => {
-    const now = new Date();
-    const currentMonthExpenses = despesas.filter(d => isSameMonth(parseISO(d.data), now));
+    // Filtra despesas PAGAS no mês selecionado para o gráfico
+    const currentMonthExpenses = despesas.filter(d => 
+        d.status === 'Pago' && 
+        d.data_pagamento && 
+        isSameMonth(parseISO(d.data_pagamento), currentMonth)
+    );
     const total = currentMonthExpenses.reduce((sum, d) => sum + d.valor, 0);
 
     const grouped = currentMonthExpenses.reduce((acc, curr) => {
@@ -98,7 +113,7 @@ const DashboardPage: React.FC = () => {
         percent: total > 0 ? value / total : 0
       }))
       .sort((a, b) => b.value - a.value);
-  }, [despesas]);
+  }, [despesas, currentMonth]);
 
   const alertasAtraso = useMemo(() => {
     const pAtrasados = plantoes
@@ -123,6 +138,8 @@ const DashboardPage: React.FC = () => {
         tipo: 'Recebível'
       }));
 
+    // Também podemos adicionar alertas de Contas a Pagar Atrasadas aqui no futuro se desejar
+    
     return [...pAtrasados, ...rAtrasados]
       .sort((a, b) => new Date(a.data_prevista).getTime() - new Date(b.data_prevista).getTime())
       .slice(0, 5);
@@ -134,22 +151,44 @@ const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Visão Geral</h1>
-        <p className="text-sm text-slate-500">{format(new Date(), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+        
+        {/* Navegação de Data */}
+        <div className="flex items-center bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <button onClick={handlePrevMonth} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                <ChevronLeftIcon />
+            </button>
+            <div className="flex items-center px-4">
+               {!isSameMonth(currentMonth, new Date()) && (
+                    <button 
+                        onClick={handleToday}
+                        className="text-xs font-bold text-primary mr-3 px-2 py-1 bg-primary/10 rounded hover:bg-primary/20 transition-colors"
+                    >
+                        Hoje
+                    </button>
+                )}
+                <span className="text-sm font-bold text-slate-800 capitalize min-w-[140px] text-center">
+                    {format(currentMonth, "MMMM yyyy", { locale: ptBR })}
+                </span>
+            </div>
+            <button onClick={handleNextMonth} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                <ChevronRightIcon />
+            </button>
+        </div>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard title="A Receber (Mês)" value={formatCurrency(thisMonthMetrics.aReceber)} icon={<CashIcon />} colorClass="text-amber-500" />
         <MetricCard title="Recebido (Mês)" value={formatCurrency(thisMonthMetrics.recebido)} icon={<CheckCircleIcon />} colorClass="text-emerald-500" />
-        <MetricCard title="Despesas (Mês)" value={formatCurrency(thisMonthMetrics.despesasMes)} icon={<TrendingDownIcon />} colorClass="text-rose-500" />
+        <MetricCard title="Despesas Pagas (Mês)" value={formatCurrency(thisMonthMetrics.despesasMes)} icon={<TrendingDownIcon />} colorClass="text-rose-500" />
         <MetricCard title="Saldo Líquido" value={formatCurrency(thisMonthMetrics.saldo)} icon={<ScaleIcon />} colorClass="text-primary" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Fluxo de Caixa */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
-          <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa (Semestral)</h2>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
@@ -168,7 +207,7 @@ const DashboardPage: React.FC = () => {
         
         {/* Alertas de Atraso */}
         <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
-          <h2 className="text-lg font-bold text-slate-800 mb-6">Alertas de Atraso</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-6">Alertas de Recebimento</h2>
           <div className="space-y-3">
             {alertasAtraso.length > 0 ? alertasAtraso.map(item => (
               <div key={item.id} className="bg-rose-50 border border-rose-100 p-3 rounded-xl flex flex-col gap-2">
@@ -191,7 +230,7 @@ const DashboardPage: React.FC = () => {
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <p className="text-sm">Nenhum pagamento atrasado.</p>
+                  <p className="text-sm">Nenhum recebimento atrasado.</p>
               </div>
             )}
           </div>
@@ -201,15 +240,15 @@ const DashboardPage: React.FC = () => {
       {/* Novo Gráfico de Despesas por Categoria */}
       <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <div className="flex justify-between items-center mb-6">
-             <h2 className="text-lg font-bold text-slate-800">Despesas por Categoria</h2>
-             <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                {format(new Date(), 'MMMM yyyy', { locale: ptBR })}
+             <h2 className="text-lg font-bold text-slate-800">Despesas Pagas por Categoria</h2>
+             <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1 rounded-full capitalize">
+                {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
              </span>
           </div>
 
           {expensesByCategory.length === 0 ? (
              <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                <p>Nenhuma despesa registrada neste mês.</p>
+                <p>Nenhuma despesa paga registrada para este mês.</p>
              </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -235,7 +274,7 @@ const DashboardPage: React.FC = () => {
                      ))}
                      <li className="pt-4 mt-2 border-t border-slate-100 flex justify-end">
                         <div className="text-right">
-                           <span className="text-xs text-slate-400 uppercase font-semibold mr-2">Total</span>
+                           <span className="text-xs text-slate-400 uppercase font-semibold mr-2">Total Pago</span>
                            <span className="text-xl font-bold text-slate-900">{formatCurrency(thisMonthMetrics.despesasMes)}</span>
                         </div>
                      </li>
@@ -285,6 +324,10 @@ const CashIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-
 const CheckCircleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const TrendingDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>;
 const ScaleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>;
+
+// Nav Icons
+const ChevronLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>;
+const ChevronRightIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>;
 
 // Category Icons
 const BusIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>; // Generic transport replacement

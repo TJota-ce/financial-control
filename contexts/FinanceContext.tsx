@@ -1,7 +1,6 @@
 
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 import type { Plantao, Despesa, RecebivelOutro, Profile, RecurrenceOptions, Hospital, Category } from '../types';
-import { INITIAL_DATA } from '../data/mock';
 import { supabase } from '../lib/supabaseClient';
 import { addDays, addWeeks, addMonths, addYears, isAfter, parseISO, format, isValid, startOfDay } from 'date-fns';
 
@@ -14,11 +13,11 @@ interface FinanceContextType {
   categories: Category[];
   loading: boolean;
   
-  addPlantao: (plantao: Omit<Plantao, 'id' | 'user_id'>, recurrence?: RecurrenceOptions) => Promise<void>;
+  addPlantao: (plantao: Omit<Plantao, 'id' | 'user_id' | 'hospital'> & { hospital_id: string }, recurrence?: RecurrenceOptions) => Promise<void>;
   updatePlantao: (plantao: Plantao) => Promise<void>;
   deletePlantao: (id: string) => Promise<void>;
   
-  addDespesa: (despesa: Omit<Despesa, 'id' | 'user_id'>, recurrence?: RecurrenceOptions) => Promise<void>;
+  addDespesa: (despesa: Omit<Despesa, 'id' | 'user_id' | 'categoria'> & { category_id: string }, recurrence?: RecurrenceOptions) => Promise<void>;
   updateDespesa: (despesa: Despesa) => Promise<void>;
   deleteDespesa: (id: string) => Promise<void>;
   
@@ -27,9 +26,11 @@ interface FinanceContextType {
   deleteRecebivel: (id: string) => Promise<void>;
   
   addHospital: (name: string) => Promise<void>;
+  updateHospital: (id: string, name: string) => Promise<void>;
   deleteHospital: (id: string) => Promise<void>;
   
   addCategory: (name: string) => Promise<void>;
+  updateCategory: (id: string, name: string) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
 
   updateProfile: (profile: Omit<Profile, 'id' | 'config'>) => Promise<void>;
@@ -68,6 +69,8 @@ const generateRecurrencesPayload = (
   while ((!isAfter(currentDate, endDate) || currentDate.getTime() === endDate.getTime()) && safetyCounter < 100) {
     const newDataStr = format(currentDate, 'yyyy-MM-dd');
     
+    // Para despesas recorrentes futuras, sempre status "A Pagar"
+    // Para plantões/recebiveis, a lógica já existe baseada em data_prevista
     const newItem = {
       ...baseData,
       user_id: userId,
@@ -76,6 +79,13 @@ const generateRecurrencesPayload = (
       frequencia: recurrence.frequency,
       data_fim: recurrence.endDate || null
     };
+
+    if (baseData.status && (baseData.status === 'Pago' || baseData.status === 'Recebido')) {
+        // Se o original era pago, as recorrências futuras nascem como pendentes
+        newItem.status = baseData.status === 'Pago' ? 'A Pagar' : 'A Receber';
+        if (newItem.data_pagamento) newItem.data_pagamento = null;
+        if (newItem.data_recebida) newItem.data_recebida = null;
+    }
 
     if (baseData.data_prevista) {
          newItem.data_prevista = format(addDays(currentDate, daysDiff), 'yyyy-MM-dd');
@@ -114,8 +124,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
         }
         const user = authData.user;
 
-        // Fetch Profile using maybeSingle()
-        const { data: profileData, error: profileError } = await supabase
+        // Fetch Profile
+        const { data: profileData } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', user.id)
@@ -140,18 +150,35 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
             else setProfile(defaultProfile);
         }
 
-        // Fetch Data - Explicitly filtering by user_id and sorting ASCENDING (oldest to newest)
+        // Fetch Data using JOINS to get names
         const [pRes, rRes, dRes, hRes, cRes] = await Promise.all([
-            supabase.from('plantoes').select('*').eq('user_id', user.id).order('data', { ascending: true }),
+            supabase.from('plantoes').select('*, hospitals(name)').eq('user_id', user.id).order('data', { ascending: true }),
             supabase.from('recebiveis').select('*').eq('user_id', user.id).order('data', { ascending: true }),
-            supabase.from('despesas').select('*').eq('user_id', user.id).order('data', { ascending: true }),
+            supabase.from('despesas').select('*, categories(name)').eq('user_id', user.id).order('data', { ascending: true }),
             supabase.from('hospitals').select('*').eq('user_id', user.id).order('name', { ascending: true }),
             supabase.from('categories').select('*').eq('user_id', user.id).order('name', { ascending: true })
         ]);
 
-        if (pRes.data) setPlantoes(pRes.data);
+        if (pRes.data) {
+             const mappedPlantoes: Plantao[] = pRes.data.map((p: any) => ({
+                 ...p,
+                 hospital: p.hospitals?.name || p.hospital || 'Hospital Desconhecido'
+             }));
+             setPlantoes(mappedPlantoes);
+        }
+
         if (rRes.data) setRecebiveis(rRes.data);
-        if (dRes.data) setDespesas(dRes.data);
+        
+        if (dRes.data) {
+             const mappedDespesas: Despesa[] = dRes.data.map((d: any) => ({
+                 ...d,
+                 categoria: d.categories?.name || d.categoria || 'Sem Categoria',
+                 // Fallback para despesas antigas sem status definido caso o script não tenha rodado perfeitamente
+                 status: d.status || 'A Pagar' 
+             }));
+             setDespesas(mappedDespesas);
+        }
+
         if (hRes.data) setHospitals(hRes.data);
         if (cRes.data) setCategories(cRes.data);
 
@@ -170,13 +197,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const today = startOfDay(new Date());
     const updated = plantoes.map((p): Plantao => {
       const previsao = parseISO(p.data_prevista);
-      // Se a data prevista for válida, status 'A Receber', e HOJE for DEPOIS da previsão, está Atrasado.
       if (isValid(previsao) && p.status === 'A Receber' && isAfter(today, previsao)) {
         return { ...p, status: 'Atrasado' };
       }
       return p;
     });
-    // Sort Ascending: Oldest to Newest
     return updated.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
   };
 
@@ -184,17 +209,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const today = startOfDay(new Date());
     const updated = recebiveis.map((r): RecebivelOutro => {
       const previsao = parseISO(r.data_prevista);
-      // Se a data prevista for válida, status 'A Receber', e HOJE for DEPOIS da previsão, está Atrasado.
       if (isValid(previsao) && r.status === 'A Receber' && isAfter(today, previsao)) {
         return { ...r, status: 'Atrasado' };
       }
       return r;
     });
-    // Sort Ascending: Oldest to Newest
     return updated.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
   };
 
-  const addPlantao = async (plantaoData: Omit<Plantao, 'id' | 'user_id'>, recurrence?: RecurrenceOptions) => {
+  const addPlantao = async (plantaoData: Omit<Plantao, 'id' | 'user_id' | 'hospital'> & { hospital_id: string }, recurrence?: RecurrenceOptions) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
@@ -208,7 +231,6 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     if (recurrence && recurrence.isRecurrent) {
         payload = generateRecurrencesPayload(basePlantao, user.id, recurrence);
     } else {
-        // Single insert - ensure recurrent fields are set to false/null
         payload = [{
             ...basePlantao,
             recorrente: false,
@@ -224,7 +246,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
   
   const updatePlantao = async (updatedPlantao: Plantao) => {
     const { error } = await supabase.from('plantoes').update({
-            hospital: updatedPlantao.hospital,
+            hospital_id: updatedPlantao.hospital_id,
             data: updatedPlantao.data,
             valor: updatedPlantao.valor,
             data_prevista: updatedPlantao.data_prevista,
@@ -236,7 +258,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
             tag: updatedPlantao.tag
         }).eq('id', updatedPlantao.id);
     if (error) throw error;
-    setPlantoes(prev => prev.map(p => p.id === updatedPlantao.id ? updatedPlantao : p));
+    fetchData();
   };
 
   const deletePlantao = async (id: string) => {
@@ -245,11 +267,17 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     setPlantoes(prev => prev.filter(p => p.id !== id));
   };
   
-  const addDespesa = async (despesaData: Omit<Despesa, 'id' | 'user_id'>, recurrence?: RecurrenceOptions) => {
+  const addDespesa = async (despesaData: Omit<Despesa, 'id' | 'user_id' | 'categoria'> & { category_id: string }, recurrence?: RecurrenceOptions) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    const newDespesa = { ...despesaData, user_id: user.id };
+    // Define status default e data de pagamento
+    const newDespesa = { 
+        ...despesaData, 
+        user_id: user.id,
+        status: despesaData.status || 'A Pagar',
+        data_pagamento: despesaData.status === 'Pago' ? (despesaData.data_pagamento || despesaData.data) : null
+    };
     
     let payload = [];
     if (recurrence && recurrence.isRecurrent) {
@@ -270,16 +298,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
   
   const updateDespesa = async (updatedDespesa: Despesa) => {
     const { error } = await supabase.from('despesas').update({
-            categoria: updatedDespesa.categoria,
+            category_id: updatedDespesa.category_id,
             descricao: updatedDespesa.descricao,
             valor: updatedDespesa.valor,
             data: updatedDespesa.data,
+            status: updatedDespesa.status,
+            data_pagamento: updatedDespesa.status === 'Pago' ? updatedDespesa.data_pagamento : null,
             recorrente: updatedDespesa.recorrente,
             frequencia: updatedDespesa.frequencia,
             data_fim: updatedDespesa.data_fim
         }).eq('id', updatedDespesa.id);
     if (error) throw error;
-    setDespesas(prev => prev.map(d => d.id === updatedDespesa.id ? updatedDespesa : d));
+    fetchData(); 
   };
 
   const deleteDespesa = async (id: string) => {
@@ -341,6 +371,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     if (data) setHospitals(prev => [...prev, data]);
   };
 
+  const updateHospital = async (id: string, name: string) => {
+    const { error } = await supabase.from('hospitals').update({ name }).eq('id', id);
+    if (error) throw error;
+    setHospitals(prev => prev.map(h => h.id === id ? { ...h, name } : h));
+    fetchData(); // Recarrega para garantir que os joins nos plantões fiquem corretos
+  };
+
   const deleteHospital = async (id: string) => {
     const { error } = await supabase.from('hospitals').delete().eq('id', id);
     if (error) throw error;
@@ -353,6 +390,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { data, error } = await supabase.from('categories').insert([{ user_id: user.id, name }]).select().single();
     if (error) throw error;
     if (data) setCategories(prev => [...prev, data]);
+  };
+
+  const updateCategory = async (id: string, name: string) => {
+    const { error } = await supabase.from('categories').update({ name }).eq('id', id);
+    if (error) throw error;
+    setCategories(prev => prev.map(c => c.id === id ? { ...c, name } : c));
+    fetchData(); // Recarrega para atualizar joins
   };
 
   const deleteCategory = async (id: string) => {
@@ -382,8 +426,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     addPlantao, updatePlantao, deletePlantao,
     addDespesa, updateDespesa, deleteDespesa,
     addRecebivel, updateRecebivel, deleteRecebivel,
-    addHospital, deleteHospital,
-    addCategory, deleteCategory,
+    addHospital, updateHospital, deleteHospital,
+    addCategory, updateCategory, deleteCategory,
     updateProfile,
     getUpdatedPlantoes, getUpdatedRecebiveis, logout
   };

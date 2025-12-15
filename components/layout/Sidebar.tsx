@@ -106,7 +106,9 @@ const Header = ({ activePage, setActivePage }: HeaderProps) => {
                <div className="flex items-center pl-4 border-l border-white/10">
                   <div className="hidden md:block text-right mr-3">
                     <p className="text-sm font-semibold text-white leading-tight">{profile.nome}</p>
-                    <p className="text-xs text-slate-400 leading-tight truncate max-w-[120px]">{profile.especialidade || 'Médico(a)'}</p>
+                    {profile.especialidade && (
+                      <p className="text-xs text-slate-400 leading-tight truncate max-w-[120px]">{profile.especialidade}</p>
+                    )}
                   </div>
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 border border-white/10 flex items-center justify-center text-sm font-bold text-white shadow-inner">
                     {profile.nome ? profile.nome.charAt(0).toUpperCase() : 'D'}

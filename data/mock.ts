@@ -1,4 +1,3 @@
-
 import type { FinanceData } from '../types';
 import { addDays, format, subDays } from 'date-fns';
 
@@ -61,6 +60,8 @@ export const INITIAL_DATA: FinanceData = {
       descricao: 'Aluguel do Consultório',
       valor: 2500,
       data: d(subDays(new Date(), 25)),
+      status: 'Pago',
+      data_pagamento: d(subDays(new Date(), 25)),
       recorrente: true,
     },
     {
@@ -70,6 +71,8 @@ export const INITIAL_DATA: FinanceData = {
       descricao: 'Combustível',
       valor: 350,
       data: d(subDays(new Date(), 3)),
+      status: 'Pago',
+      data_pagamento: d(subDays(new Date(), 3)),
       recorrente: false,
     },
   ],
