@@ -1,9 +1,11 @@
-
 import React, { useMemo, useState } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import MetricCard from '../components/dashboard/MetricCard';
-import { format, getMonth, getYear, isSameMonth, parseISO, subMonths, addMonths, startOfMonth, endOfMonth } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+// Fix: Removed subMonths and startOfMonth from imports as they are reported as missing
+import { format, getMonth, getYear, isSameMonth, parseISO, addMonths, endOfMonth } from 'date-fns';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const formatCurrency = (value: number) => {
@@ -37,18 +39,19 @@ const COLORS = ['#4F46E5', '#7C3AED', '#EC4899', '#F59E0B', '#10B981', '#3B82F6'
 
 const DashboardPage: React.FC = () => {
   const { getUpdatedPlantoes, getUpdatedRecebiveis, despesas, loading } = useFinance();
+  const { isTrialing, daysRemaining, isPro, isAdmin } = useSubscription();
   const plantoes = getUpdatedPlantoes();
   const recebiveis = getUpdatedRecebiveis();
 
   // Estado para navegação de data
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
+  // Fix: Use addMonths with negative value instead of subMonths
+  const handlePrevMonth = () => setCurrentMonth(prev => addMonths(prev, -1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleToday = () => setCurrentMonth(new Date());
 
   const thisMonthMetrics = useMemo(() => {
-    // Usa currentMonth em vez de new Date()
     const targetDate = currentMonth;
     
     const aReceber = [...plantoes, ...recebiveis]
@@ -59,7 +62,6 @@ const DashboardPage: React.FC = () => {
       .filter(p => p.status === 'Recebido' && p.data_recebida && isSameMonth(parseISO(p.data_recebida), targetDate))
       .reduce((sum, p) => sum + p.valor, 0);
 
-    // Despesas do Mês: Apenas as que estão PAGAS e cuja Data de PAGAMENTO cai no mês selecionado
     const despesasMes = despesas
       .filter(d => d.status === 'Pago' && d.data_pagamento && isSameMonth(parseISO(d.data_pagamento), targetDate))
       .reduce((sum, d) => sum + d.valor, 0);
@@ -71,8 +73,8 @@ const DashboardPage: React.FC = () => {
 
   const chartData = useMemo(() => {
     const dataPoints = [];
-    // Centraliza o gráfico no mês selecionado (ex: 2 meses antes, mês atual, 3 meses depois)
-    const startDate = subMonths(currentMonth, 2);
+    // Fix: Use addMonths with negative value instead of subMonths
+    const startDate = addMonths(currentMonth, -2);
 
     for (let i = 0; i < 6; i++) {
       const date = addMonths(startDate, i);
@@ -93,7 +95,6 @@ const DashboardPage: React.FC = () => {
   }, [plantoes, recebiveis, currentMonth]);
 
   const expensesByCategory = useMemo(() => {
-    // Filtra despesas PAGAS no mês selecionado para o gráfico
     const currentMonthExpenses = despesas.filter(d => 
         d.status === 'Pago' && 
         d.data_pagamento && 
@@ -137,8 +138,6 @@ const DashboardPage: React.FC = () => {
         status: r.status,
         tipo: 'Recebível'
       }));
-
-    // Também podemos adicionar alertas de Contas a Pagar Atrasadas aqui no futuro se desejar
     
     return [...pAtrasados, ...rAtrasados]
       .sort((a, b) => new Date(a.data_prevista).getTime() - new Date(b.data_prevista).getTime())
@@ -151,10 +150,29 @@ const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {/* Banner de Upgrade para Trial */}
+      {isTrialing && !isAdmin && (
+        <div className="bg-gradient-to-r from-primary to-secondary p-4 sm:p-6 rounded-2xl shadow-xl text-white flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-4">
+                <div className="bg-white/20 p-3 rounded-xl backdrop-blur-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 className="text-xl font-bold">Você está no Período de Testes</h3>
+                    <p className="text-white/80 text-sm">Faltam <strong>{daysRemaining} dias</strong> para o fim do seu acesso gratuito. Garanta o plano PRO hoje.</p>
+                </div>
+            </div>
+            <button className="bg-white text-primary font-bold px-6 py-2.5 rounded-xl hover:bg-slate-50 transition-colors shadow-lg whitespace-nowrap">
+                Assinar Plano PRO (R$ 99/mês)
+            </button>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Visão Geral</h1>
         
-        {/* Navegação de Data */}
         <div className="flex items-center bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm">
             <button onClick={handlePrevMonth} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
                 <ChevronLeftIcon />
@@ -186,7 +204,6 @@ const DashboardPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Fluxo de Caixa */}
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Fluxo de Caixa (Semestral)</h2>
           <ResponsiveContainer width="100%" height={300}>
@@ -206,7 +223,6 @@ const DashboardPage: React.FC = () => {
           </ResponsiveContainer>
         </div>
         
-        {/* Alertas de Atraso */}
         <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <h2 className="text-lg font-bold text-slate-800 mb-6">Alertas de Recebimento</h2>
           <div className="space-y-3">
@@ -238,7 +254,6 @@ const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Novo Gráfico de Despesas por Categoria */}
       <div className="bg-white p-6 rounded-2xl shadow-soft border border-slate-100">
           <div className="flex justify-between items-center mb-6">
              <h2 className="text-lg font-bold text-slate-800">Despesas Pagas por Categoria</h2>
@@ -253,7 +268,6 @@ const DashboardPage: React.FC = () => {
              </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-               {/* Lista de Categorias (Lado Esquerdo - 3/5) */}
                <div className="lg:col-span-3 overflow-y-auto max-h-[350px] pr-2">
                   <ul className="space-y-4">
                      {expensesByCategory.map((category, index) => (
@@ -282,7 +296,6 @@ const DashboardPage: React.FC = () => {
                   </ul>
                </div>
 
-               {/* Gráfico de Rosca (Lado Direito - 2/5) */}
                <div className="lg:col-span-2 h-[300px] relative flex justify-center items-center">
                    <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -306,7 +319,6 @@ const DashboardPage: React.FC = () => {
                          />
                       </PieChart>
                    </ResponsiveContainer>
-                   {/* Center Text Trick */}
                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <span className="text-xs text-slate-400 font-medium uppercase">Total</span>
                       <span className="text-lg font-bold text-slate-800">{formatCurrency(thisMonthMetrics.despesasMes)}</span>

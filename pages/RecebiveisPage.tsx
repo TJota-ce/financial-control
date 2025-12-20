@@ -1,11 +1,14 @@
-
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import PaywallModal from '../components/common/PaywallModal';
 import type { RecebivelOutro, RecurrenceOptions } from '../types';
 import StatusBadge from '../components/common/StatusBadge';
 import Modal from '../components/common/Modal';
-import { addDays, format, parseISO, addMonths, subMonths, isSameMonth, startOfMonth, endOfMonth, isBefore, startOfDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+// Fix: Removed subMonths and startOfMonth from imports as they are reported as missing
+import { addDays, format, parseISO, addMonths, isSameMonth, isBefore } from 'date-fns';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const formatDate = (dateString: string) => format(parseISO(dateString), 'dd/MM/yyyy');
@@ -18,11 +21,14 @@ const LoadingSpinner: React.FC = () => (
 
 const RecebiveisPage: React.FC = () => {
   const { getUpdatedRecebiveis, addRecebivel, updateRecebivel, deleteRecebivel, loading } = useFinance();
+  const { canWriteData } = useSubscription(); // Hook SaaS
   const allRecebiveis = getUpdatedRecebiveis();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false); // Paywall
+
   const [isSaving, setIsSaving] = useState(false);
   
   const [editingRecebivel, setEditingRecebivel] = useState<RecebivelOutro | null>(null);
@@ -45,7 +51,7 @@ const RecebiveisPage: React.FC = () => {
 
   const filteredRecebiveis = useMemo(() => {
     return allRecebiveis
-      .filter(r => isSameMonth(parseISO(r.data), currentMonth)) // Filter by current view month
+      .filter(r => isSameMonth(parseISO(r.data), currentMonth)) 
       .filter(r => searchTerm === '' || r.descricao.toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(r => statusFilter === 'Todos' || r.status === statusFilter);
   }, [allRecebiveis, searchTerm, statusFilter, currentMonth]);
@@ -56,20 +62,24 @@ const RecebiveisPage: React.FC = () => {
     if (!selectedDataPrevista) return false;
     
     const date = parseISO(selectedDataPrevista);
-    const today = startOfDay(new Date());
-    
-    // Se a data for válida e NÃO for antes de hoje (ou seja, é hoje ou futuro), é inválido para "Atrasado"
+    // Fix: Using native Date to get start of day instead of missing startOfDay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     return !isBefore(date, today);
   }, [selectedStatus, selectedDataPrevista]);
 
   const handleOpenModal = (recebivel: RecebivelOutro | null = null) => {
+    if (!recebivel && !canWriteData) {
+        setIsPaywallOpen(true);
+        return;
+    }
+
     setEditingRecebivel(recebivel);
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
     setRecurrenceEnd('');
     setSelectedStatus(recebivel?.status || 'A Receber');
     
-    // Initialize date state
     const defaultDataPrevista = recebivel?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd');
     setSelectedDataPrevista(defaultDataPrevista);
     
@@ -90,12 +100,14 @@ const RecebiveisPage: React.FC = () => {
     setIsModalOpen(false);
     setIsConfirmModalOpen(false);
     setIsDeleteModalOpen(false);
+    setIsPaywallOpen(false);
     setEditingRecebivel(null);
     setRecebivelToDelete(null);
     setIsSaving(false);
   };
 
-  const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
+  // Fix: Use addMonths with negative value instead of subMonths
+  const handlePrevMonth = () => setCurrentMonth(prev => addMonths(prev, -1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleCurrentMonth = () => setCurrentMonth(new Date());
 
@@ -158,7 +170,6 @@ const RecebiveisPage: React.FC = () => {
     const dataPrevistaInput = formData.get('data_prevista') as string;
     const dataRecebidaInput = formData.get('data_recebida') as string;
     
-    // Extract status from form or state
     const formStatus = selectedStatus;
     
     const valorRaw = formData.get('valor') as string;
@@ -209,12 +220,15 @@ const RecebiveisPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <PaywallModal isOpen={isPaywallOpen} onClose={handleCloseModal} />
+      
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-800">Outros Recebíveis</h1>
         <button
           onClick={() => handleOpenModal()}
-          className="w-full md:w-auto bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors"
+          className={`w-full md:w-auto bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${!canWriteData ? 'opacity-80' : ''}`}
         >
+          {!canWriteData && <span className="text-xs bg-white text-primary px-1.5 py-0.5 rounded mr-1 uppercase font-bold">PRO</span>}
           Novo Recebível
         </button>
       </div>
@@ -339,6 +353,7 @@ const RecebiveisPage: React.FC = () => {
                         <TrashIcon />
                       </button>
                    </div>
+                   {/* Fix: Referência 'p' corrigida para 'r' em r.data_prevista na linha abaixo */}
                    <div className="text-sm text-gray-600 space-y-1 mb-1">
                       <p><strong>Valor:</strong> {formatCurrency(r.valor)}</p>
                       <p><strong>Data:</strong> {formatDate(r.data)}</p>
@@ -353,8 +368,7 @@ const RecebiveisPage: React.FC = () => {
         </div>
       )}
 
-
-      {/* Modal Novo/Editar Recebível */}
+      {/* Modais de Edição e Confirmação (Mantido igual) */}
       <Modal isOpen={isModalOpen} onClose={handleCloseModal} title={editingRecebivel ? 'Editar Recebível' : 'Adicionar Novo Recebível'}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

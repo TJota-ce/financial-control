@@ -1,6 +1,8 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FinanceProvider } from './contexts/FinanceContext';
+import { ToastProvider, useToast } from './contexts/ToastContext';
+import { SubscriptionProvider, useSubscription } from './contexts/SubscriptionContext';
 import Header from './components/layout/Sidebar';
 import DashboardPage from './pages/DashboardPage';
 import PlantaoPage from './pages/PlantaoPage';
@@ -8,6 +10,8 @@ import RecebiveisPage from './pages/RecebiveisPage';
 import DespesasPage from './pages/DespesasPage';
 import RelatoriosPage from './pages/RelatoriosPage';
 import ConfiguracoesPage from './pages/ConfiguracoesPage';
+import AdminPage from './pages/AdminPage'; // Import Admin Page
+import SubscriptionBanner from './components/common/SubscriptionBanner'; // Import Banner
 import AuthPage from './components/auth/AuthPage';
 import type { Page } from './types';
 import { supabase } from './lib/supabaseClient';
@@ -21,6 +25,28 @@ const LoadingSpinner = () => (
 
 const AppContent = () => {
   const [activePage, setActivePage] = useState<Page>('Dashboard');
+  const { isAdmin, isTrialing, daysRemaining, loading: subLoading } = useSubscription();
+  const { showToast } = useToast();
+  const hasShownWelcome = useRef(false);
+
+  // Efeito para mostrar mensagem de boas-vindas com status do plano
+  useEffect(() => {
+    if (!subLoading && !hasShownWelcome.current) {
+        if (isAdmin) {
+             showToast('Bem-vindo, Administrador!', 'info');
+        } else if (isTrialing) {
+            if (daysRemaining > 0) {
+                const dayWord = daysRemaining === 1 ? 'dia' : 'dias';
+                showToast(`Bem-vindo! Aproveite seus ${daysRemaining} ${dayWord} restantes de teste gratuito.`, 'info');
+            } else {
+                showToast('Seu período de teste acabou. Assine para continuar.', 'error');
+            }
+        } else {
+             showToast('Bem-vindo de volta!', 'success');
+        }
+        hasShownWelcome.current = true;
+    }
+  }, [subLoading, isTrialing, daysRemaining, isAdmin, showToast]);
 
   const renderPage = () => {
     switch (activePage) {
@@ -36,6 +62,8 @@ const AppContent = () => {
         return <RelatoriosPage />;
       case 'Perfil':
         return <ConfiguracoesPage />;
+      case 'Admin':
+        return isAdmin ? <AdminPage /> : <DashboardPage />; // Proteção simples de rota
       default:
         return <DashboardPage />;
     }
@@ -43,6 +71,7 @@ const AppContent = () => {
   
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-800">
+      <SubscriptionBanner />
       <Header activePage={activePage} setActivePage={setActivePage} />
       <main className="flex-1 overflow-y-auto flex flex-col">
         <div className="p-4 sm:p-6 lg:p-8 flex-grow">
@@ -56,11 +85,11 @@ const AppContent = () => {
   );
 };
 
-
-const App = () => {
+const AuthWrapper = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-
+  const { showToast } = useToast();
+  
   useEffect(() => {
     // Verifica sessão ativa ao carregar
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -71,9 +100,10 @@ const App = () => {
     // Escuta mudanças na autenticação
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setLoading(false);
+      // Removido toast daqui para ser tratado no AppContent com contexto de assinatura
     });
 
     return () => subscription.unsubscribe();
@@ -82,10 +112,10 @@ const App = () => {
   const handleLogout = async () => {
     try {
         await supabase.auth.signOut();
+        showToast('Você saiu do sistema.', 'info');
     } catch (error) {
         console.error("Erro ao fazer logout:", error);
     } finally {
-        // Força a limpeza da sessão local para garantir a atualização da UI
         setSession(null);
     }
   };
@@ -99,9 +129,19 @@ const App = () => {
   }
 
   return (
-    <FinanceProvider onLogout={handleLogout}>
-      <AppContent />
-    </FinanceProvider>
+    <SubscriptionProvider>
+        <FinanceProvider onLogout={handleLogout}>
+          <AppContent />
+        </FinanceProvider>
+    </SubscriptionProvider>
+  );
+}
+
+const App = () => {
+  return (
+    <ToastProvider>
+      <AuthWrapper />
+    </ToastProvider>
   );
 }
 

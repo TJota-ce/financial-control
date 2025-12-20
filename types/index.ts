@@ -56,18 +56,25 @@ export interface Category {
   name: string;
 }
 
+export type SubscriptionStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid';
+
 export interface Profile {
   id: string;
   nome: string;
   especialidade: string;
   crm: string;
-  // config mantido como opcional para compatibilidade durante migração, mas não será o foco principal
+  // Campos SaaS
+  is_admin?: boolean;
+  subscription_status?: SubscriptionStatus;
+  trial_end?: string; // ISO String date
+  current_period_end?: string; // ISO String date
+  // config mantido como opcional para compatibilidade durante migração
   config: {
     especialidades?: string[];
   };
 }
 
-export type Page = 'Dashboard' | 'Plantões' | 'Recebíveis' | 'Despesas' | 'Relatórios' | 'Perfil';
+export type Page = 'Dashboard' | 'Plantões' | 'Recebíveis' | 'Despesas' | 'Relatórios' | 'Perfil' | 'Admin';
 
 export interface FinanceData {
   usuario: {

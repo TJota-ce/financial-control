@@ -1,10 +1,13 @@
-
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import PaywallModal from '../components/common/PaywallModal';
 import type { Despesa, RecurrenceOptions } from '../types';
 import Modal from '../components/common/Modal';
-import { format, isSameMonth, parseISO, addMonths, subMonths } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+// Fix: Removed subMonths from imports as it is reported as missing
+import { format, isSameMonth, parseISO, addMonths } from 'date-fns';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const formatDate = (dateString: string) => format(parseISO(dateString), 'dd/MM/yyyy');
@@ -26,9 +29,12 @@ const LoadingSpinner: React.FC = () => (
 
 const DespesasPage: React.FC = () => {
   const { despesas, categories, addDespesa, updateDespesa, deleteDespesa, loading } = useFinance();
+  const { canWriteData } = useSubscription(); // Hook SaaS
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false); // Paywall
+
   const [isSaving, setIsSaving] = useState(false);
 
   const [editingDespesa, setEditingDespesa] = useState<Despesa | null>(null);
@@ -57,13 +63,16 @@ const DespesasPage: React.FC = () => {
   }, [despesas, searchTerm, categoryFilter, currentMonth]);
   
   const totalDespesasMes = useMemo(() => {
-      // Show total "To Pay" (Vencimento) for the month view OR Total "Paid" in this month?
-      // Usually in the expense management screen, we sum up all liabilities for the month.
       return filteredDespesas.reduce((sum, d) => sum + d.valor, 0);
   }, [filteredDespesas]);
 
 
   const handleOpenModal = (despesa: Despesa | null = null) => {
+    if (!despesa && !canWriteData) {
+        setIsPaywallOpen(true);
+        return;
+    }
+    
     setEditingDespesa(despesa);
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
@@ -80,12 +89,14 @@ const DespesasPage: React.FC = () => {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setIsDeleteModalOpen(false);
+    setIsPaywallOpen(false);
     setEditingDespesa(null);
     setDespesaToDelete(null);
     setIsSaving(false);
   };
   
-  const handlePrevMonth = () => setCurrentMonth(prev => subMonths(prev, 1));
+  // Fix: Use addMonths with negative value instead of subMonths
+  const handlePrevMonth = () => setCurrentMonth(prev => addMonths(prev, -1));
   const handleNextMonth = () => setCurrentMonth(prev => addMonths(prev, 1));
   const handleCurrentMonth = () => setCurrentMonth(new Date());
 
@@ -176,12 +187,15 @@ const DespesasPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <PaywallModal isOpen={isPaywallOpen} onClose={handleCloseModal} />
+
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-800">Gerenciar Despesas</h1>
         <button
           onClick={() => handleOpenModal()}
-          className="w-full md:w-auto bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors"
+          className={`w-full md:w-auto bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${!canWriteData ? 'opacity-80' : ''}`}
         >
+          {!canWriteData && <span className="text-xs bg-white text-primary px-1.5 py-0.5 rounded mr-1 uppercase font-bold">PRO</span>}
           Nova Despesa
         </button>
       </div>
@@ -307,7 +321,7 @@ const DespesasPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Criar/Editar Despesa */}
+      {/* Modal Criar/Editar Despesa e outros modais... (Mantido igual) */}
       <Modal isOpen={isModalOpen} onClose={handleCloseModal} title={editingDespesa ? 'Editar Despesa' : 'Adicionar Nova Despesa'}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

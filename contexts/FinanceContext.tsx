@@ -1,8 +1,11 @@
-
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
-import type { Plantao, Despesa, RecebivelOutro, Profile, RecurrenceOptions, Hospital, Category } from '../types';
+import type { Plantao, Despesa, RecebivelOutro, Profile, RecurrenceOptions, Hospital, Category, Page } from '../types';
 import { supabase } from '../lib/supabaseClient';
-import { addDays, addWeeks, addMonths, addYears, isAfter, parseISO, format, isValid, startOfDay } from 'date-fns';
+// Fix: Removed startOfDay from imports as it is reported as missing
+import { addDays, addWeeks, addMonths, addYears, isAfter, parseISO, format, isValid } from 'date-fns';
+import { useSubscription } from './SubscriptionContext';
+
+export type ConfigTab = 'perfil' | 'hospitais' | 'categorias' | 'assinatura';
 
 interface FinanceContextType {
   profile: Profile | null;
@@ -12,6 +15,10 @@ interface FinanceContextType {
   hospitals: Hospital[];
   categories: Category[];
   loading: boolean;
+  
+  // Controle de Abas de Configuração
+  activeConfigTab: ConfigTab;
+  setActiveConfigTab: (tab: ConfigTab) => void;
   
   addPlantao: (plantao: Omit<Plantao, 'id' | 'user_id' | 'hospital'> & { hospital_id: string }, recurrence?: RecurrenceOptions) => Promise<void>;
   updatePlantao: (plantao: Plantao) => Promise<void>;
@@ -42,7 +49,6 @@ interface FinanceContextType {
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-// Helper to calculate dates only, returns array of items without IDs
 const generateRecurrencesPayload = (
   baseData: any, 
   userId: string,
@@ -50,14 +56,13 @@ const generateRecurrencesPayload = (
 ) => {
   const items = [];
   const startDate = parseISO(baseData.data);
-  const endDate = recurrence.endDate ? parseISO(recurrence.endDate) : addMonths(startDate, 12); // Default 1 year limit
+  const endDate = recurrence.endDate ? parseISO(recurrence.endDate) : addMonths(startDate, 12);
   
   if (!isValid(startDate)) return [baseData];
 
   let safetyCounter = 0;
   let currentDate = startDate;
   
-  // Calculate gap if data_prevista exists (for plantoes/recebiveis)
   let daysDiff = 0;
   if (baseData.data_prevista) {
       const dataPrevistaDate = parseISO(baseData.data_prevista);
@@ -69,8 +74,6 @@ const generateRecurrencesPayload = (
   while ((!isAfter(currentDate, endDate) || currentDate.getTime() === endDate.getTime()) && safetyCounter < 100) {
     const newDataStr = format(currentDate, 'yyyy-MM-dd');
     
-    // Para despesas recorrentes futuras, sempre status "A Pagar"
-    // Para plantões/recebiveis, a lógica já existe baseada em data_prevista
     const newItem = {
       ...baseData,
       user_id: userId,
@@ -81,7 +84,6 @@ const generateRecurrencesPayload = (
     };
 
     if (baseData.status && (baseData.status === 'Pago' || baseData.status === 'Recebido')) {
-        // Se o original era pago, as recorrências futuras nascem como pendentes
         newItem.status = baseData.status === 'Pago' ? 'A Pagar' : 'A Receber';
         if (newItem.data_pagamento) newItem.data_pagamento = null;
         if (newItem.data_recebida) newItem.data_recebida = null;
@@ -113,6 +115,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Estado para aba ativa de configuração
+  const [activeConfigTab, setActiveConfigTab] = useState<ConfigTab>('perfil');
+
+  const { checkSubscription } = useSubscription();
 
   const fetchData = async () => {
     setLoading(true);
@@ -124,7 +131,6 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
         }
         const user = authData.user;
 
-        // Fetch Profile
         const { data: profileData } = await supabase
             .from('profiles')
             .select('*')
@@ -133,12 +139,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
         
         if (profileData) {
             setProfile(profileData);
+            checkSubscription();
         } else {
             const defaultProfile = {
                 id: user.id,
                 nome: user.user_metadata.nome || 'Doutor(a)',
                 crm: user.user_metadata.crm || '',
                 especialidade: '',
+                subscription_status: 'trialing',
+                trial_end: addDays(new Date(), 7).toISOString(),
                 config: { especialidades: [] }
             };
             const { data: newProfile, error: insertError } = await supabase
@@ -146,11 +155,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
                 .upsert(defaultProfile)
                 .select()
                 .single();
-            if (!insertError && newProfile) setProfile(newProfile);
-            else setProfile(defaultProfile);
+            
+            if (!insertError && newProfile) {
+                setProfile(newProfile);
+                checkSubscription();
+            } else {
+                setProfile(defaultProfile as any);
+            }
         }
 
-        // Fetch Data using JOINS to get names
         const [pRes, rRes, dRes, hRes, cRes] = await Promise.all([
             supabase.from('plantoes').select('*, hospitals(name)').eq('user_id', user.id).order('data', { ascending: true }),
             supabase.from('recebiveis').select('*').eq('user_id', user.id).order('data', { ascending: true }),
@@ -173,7 +186,6 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
              const mappedDespesas: Despesa[] = dRes.data.map((d: any) => ({
                  ...d,
                  categoria: d.categories?.name || d.categoria || 'Sem Categoria',
-                 // Fallback para despesas antigas sem status definido caso o script não tenha rodado perfeitamente
                  status: d.status || 'A Pagar' 
              }));
              setDespesas(mappedDespesas);
@@ -194,7 +206,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
   }, []);
 
   const getUpdatedPlantoes = (): Plantao[] => {
-    const today = startOfDay(new Date());
+    // Fix: Using native Date to get start of day instead of missing startOfDay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
     const updated = plantoes.map((p): Plantao => {
       const previsao = parseISO(p.data_prevista);
       if (isValid(previsao) && p.status === 'A Receber' && isAfter(today, previsao)) {
@@ -206,7 +221,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
   };
 
   const getUpdatedRecebiveis = (): RecebivelOutro[] => {
-    const today = startOfDay(new Date());
+    // Fix: Using native Date to get start of day instead of missing startOfDay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const updated = recebiveis.map((r): RecebivelOutro => {
       const previsao = parseISO(r.data_prevista);
       if (isValid(previsao) && r.status === 'A Receber' && isAfter(today, previsao)) {
@@ -221,14 +239,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // Procura o nome do hospital para preencher o campo 'hospital' caso o banco exija (constraint not-null)
     const hospitalName = hospitals.find(h => h.id === plantaoData.hospital_id)?.name || 'Hospital';
 
     const basePlantao = {
       ...plantaoData,
       user_id: user.id,
       status: plantaoData.status || 'A Receber',
-      hospital: hospitalName // Preenche o campo de texto para evitar erro de constraint
+      hospital: hospitalName 
     };
 
     let payload = [];
@@ -275,16 +292,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // Procura o nome da categoria para preencher o campo 'categoria' caso o banco exija (constraint not-null)
     const categoryName = categories.find(c => c.id === despesaData.category_id)?.name || 'Despesa';
 
-    // Define status default e data de pagamento
     const newDespesa = { 
         ...despesaData, 
         user_id: user.id,
         status: despesaData.status || 'A Pagar',
         data_pagamento: despesaData.status === 'Pago' ? (despesaData.data_pagamento || despesaData.data) : null,
-        categoria: categoryName // Preenche o campo de texto para evitar erro de constraint
+        categoria: categoryName 
     };
     
     let payload = [];
@@ -383,7 +398,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { error } = await supabase.from('hospitals').update({ name }).eq('id', id);
     if (error) throw error;
     setHospitals(prev => prev.map(h => h.id === id ? { ...h, name } : h));
-    fetchData(); // Recarrega para garantir que os joins nos plantões fiquem corretos
+    fetchData();
   };
 
   const deleteHospital = async (id: string) => {
@@ -404,7 +419,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
     const { error } = await supabase.from('categories').update({ name }).eq('id', id);
     if (error) throw error;
     setCategories(prev => prev.map(c => c.id === id ? { ...c, name } : c));
-    fetchData(); // Recarrega para atualizar joins
+    fetchData(); 
   };
 
   const deleteCategory = async (id: string) => {
@@ -431,6 +446,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode, onLogout: () => vo
 
   const value = {
     profile, plantoes, recebiveis, despesas, hospitals, categories, loading,
+    activeConfigTab, setActiveConfigTab,
     addPlantao, updatePlantao, deletePlantao,
     addDespesa, updateDespesa, deleteDespesa,
     addRecebivel, updateRecebivel, deleteRecebivel,

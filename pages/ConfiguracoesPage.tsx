@@ -1,8 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
-import { useFinance } from '../contexts/FinanceContext';
+import { useFinance, ConfigTab } from '../contexts/FinanceContext';
+import { supabase } from '../lib/supabaseClient';
 import { Profile } from '../types';
 import Modal from '../components/common/Modal';
+import PricingTable from '../components/common/PricingTable';
+import { format, parseISO } from 'date-fns';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
+import { useToast } from '../contexts/ToastContext';
 
 const LoadingSpinner: React.FC = () => (
   <div className="flex justify-center items-center h-64">
@@ -10,21 +15,21 @@ const LoadingSpinner: React.FC = () => (
   </div>
 );
 
-type TabType = 'perfil' | 'hospitais' | 'categorias';
-
 const ConfiguracoesPage: React.FC = () => {
   const { 
     profile, updateProfile, 
     hospitals, addHospital, updateHospital, deleteHospital, 
     categories, addCategory, updateCategory, deleteCategory, 
     plantoes, despesas,
-    loading 
+    loading,
+    activeConfigTab, setActiveConfigTab 
   } = useFinance();
   
+  const { showToast } = useToast();
   const [userForm, setUserForm] = useState<Omit<Profile, 'id' | 'config'>>({ nome: '', especialidade: '', crm: '' });
   const [newHospital, setNewHospital] = useState('');
   const [newCategory, setNewCategory] = useState('');
-  const [activeTab, setActiveTab] = useState<TabType>('perfil');
+  const [processingPlan, setProcessingPlan] = useState<string | null>(null);
 
   // Estados para Edição inline
   const [editingItem, setEditingItem] = useState<{ type: 'hospital' | 'category', id: string, text: string } | null>(null);
@@ -32,6 +37,10 @@ const ConfiguracoesPage: React.FC = () => {
   // Estados para o Modal de Aviso (Popup)
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState('');
+
+  // Estado para Modal de Cancelamento de Assinatura
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -57,15 +66,13 @@ const ConfiguracoesPage: React.FC = () => {
   const handleUserFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateProfile(userForm).then(() => {
-        alert('Perfil atualizado com sucesso!');
+        showToast('Perfil atualizado com sucesso!', 'success');
     }).catch(err => {
         console.error(err);
-        alert(`Erro ao atualizar perfil: ${getErrorMessage(err)}`);
+        showToast(`Erro ao atualizar perfil: ${getErrorMessage(err)}`, 'error');
     });
   };
   
-  // --- Lógica de Hospitais ---
-
   const handleAddHospital = async () => {
     if (newHospital && !hospitals.find(h => h.name === newHospital)) {
         try {
@@ -73,16 +80,15 @@ const ConfiguracoesPage: React.FC = () => {
             setNewHospital('');
         } catch (error) {
             console.error(error);
-            alert(`Erro ao adicionar hospital: ${getErrorMessage(error)}`);
+            showToast(`Erro ao adicionar hospital: ${getErrorMessage(error)}`, 'error');
         }
     }
   };
   
   const handleRemoveHospital = async (id: string) => {
-     // Validação: Verificar se existe algum plantão associado a este hospital
      const hasAssociatedPlantoes = plantoes.some(p => p.hospital_id === id);
      if (hasAssociatedPlantoes) {
-         setWarningMessage('Não é possível excluir este hospital pois existem plantões registrados vinculados a ele. Remova ou edite os plantões associados antes de excluir o hospital.');
+         setWarningMessage('Não é possível excluir este hospital pois existem plantões registrados vinculados a ele.');
          setIsWarningModalOpen(true);
          return;
      }
@@ -91,7 +97,7 @@ const ConfiguracoesPage: React.FC = () => {
          await deleteHospital(id);
      } catch (error) {
          console.error(error);
-         alert(`Erro ao remover hospital: ${getErrorMessage(error)}`);
+         showToast(`Erro ao remover hospital: ${getErrorMessage(error)}`, 'error');
      }
   };
 
@@ -106,12 +112,10 @@ const ConfiguracoesPage: React.FC = () => {
           setEditingItem(null);
       } catch (error) {
           console.error(error);
-          alert(`Erro ao atualizar hospital: ${getErrorMessage(error)}`);
+          showToast(`Erro ao atualizar hospital: ${getErrorMessage(error)}`, 'error');
       }
   };
 
-  // --- Lógica de Categorias ---
-  
   const handleAddCategory = async () => {
     if (newCategory && !categories.find(c => c.name === newCategory)) {
         try {
@@ -119,16 +123,15 @@ const ConfiguracoesPage: React.FC = () => {
             setNewCategory('');
         } catch (error) {
             console.error(error);
-            alert(`Erro ao adicionar categoria: ${getErrorMessage(error)}`);
+            showToast(`Erro ao adicionar categoria: ${getErrorMessage(error)}`, 'error');
         }
     }
   };
   
   const handleRemoveCategory = async (id: string) => {
-      // Validação: Verificar se existe alguma despesa associada a esta categoria
       const hasAssociatedDespesas = despesas.some(d => d.category_id === id);
       if (hasAssociatedDespesas) {
-          setWarningMessage('Não é possível excluir esta categoria pois existem despesas registradas vinculadas a ela. Remova ou edite as despesas associadas antes de excluir a categoria.');
+          setWarningMessage('Não é possível excluir esta categoria pois existem despesas vinculadas.');
           setIsWarningModalOpen(true);
           return;
       }
@@ -137,7 +140,7 @@ const ConfiguracoesPage: React.FC = () => {
           await deleteCategory(id);
       } catch (error) {
           console.error(error);
-          alert(`Erro ao remover categoria: ${getErrorMessage(error)}`);
+          showToast(`Erro ao remover categoria: ${getErrorMessage(error)}`, 'error');
       }
   };
 
@@ -152,7 +155,58 @@ const ConfiguracoesPage: React.FC = () => {
         setEditingItem(null);
     } catch (error) {
         console.error(error);
-        alert(`Erro ao atualizar categoria: ${getErrorMessage(error)}`);
+        showToast(`Erro ao atualizar categoria: ${getErrorMessage(error)}`, 'error');
+    }
+  };
+
+  const handleCancelSubscription = async () => {
+    if (!profile) return;
+    setIsCanceling(true);
+    try {
+        const { error } = await supabase
+            .from('profiles')
+            .update({ subscription_status: 'canceled' })
+            .eq('id', profile.id);
+        
+        if (error) throw error;
+        showToast("Assinatura cancelada com sucesso.", "success");
+        window.location.reload(); 
+    } catch (error) {
+        console.error("Erro ao cancelar assinatura:", error);
+        showToast("Erro ao cancelar assinatura. Tente novamente.", "error");
+    } finally {
+        setIsCanceling(false);
+        setIsCancelModalOpen(false);
+    }
+  };
+
+  const handlePlanSelection = async (plan: string) => {
+    if (plan === 'pro') {
+        setProcessingPlan('pro');
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) throw new Error("Usuário não identificado.");
+
+            // Chama a Edge Function para criar a sessão do Stripe
+            const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+                body: { 
+                    user_id: user.id, 
+                    email: user.email,
+                    // O Price ID do Stripe deve estar configurado na Edge Function ou enviado aqui se for dinâmico
+                }
+            });
+
+            if (error) throw error;
+            if (data?.url) {
+                window.location.href = data.url; // Redireciona para o Stripe
+            } else {
+                throw new Error("Não foi possível gerar o link de pagamento.");
+            }
+        } catch (error: any) {
+            console.error("Erro no checkout:", error);
+            showToast(getErrorMessage(error), 'error');
+            setProcessingPlan(null);
+        }
     }
   };
 
@@ -162,7 +216,7 @@ const ConfiguracoesPage: React.FC = () => {
   }
 
   const renderTabContent = () => {
-    switch (activeTab) {
+    switch (activeConfigTab) {
         case 'perfil':
             return (
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
@@ -191,7 +245,6 @@ const ConfiguracoesPage: React.FC = () => {
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">Hospitais</h2>
                   
-                  {/* Formulário de Adição Responsivo */}
                   <div className="flex flex-col sm:flex-row gap-3 mb-6">
                       <input 
                         type="text" 
@@ -251,7 +304,6 @@ const ConfiguracoesPage: React.FC = () => {
               <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100 animate-fade-in">
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">Categorias</h2>
                   
-                  {/* Formulário de Adição Responsivo */}
                   <div className="flex flex-col sm:flex-row gap-3 mb-6">
                       <input 
                         type="text" 
@@ -306,6 +358,79 @@ const ConfiguracoesPage: React.FC = () => {
                   </ul>
               </div>
             );
+        case 'assinatura':
+             if (!profile) return null;
+             const isCanceled = profile.subscription_status === 'canceled';
+             const isTrial = profile.subscription_status === 'trialing';
+             const isActive = profile.subscription_status === 'active';
+             const statusLabel = isTrial ? 'Período de Testes (Trial)' : isActive ? 'Plano PRO' : profile.subscription_status === 'past_due' ? 'Pagamento Pendente' : isCanceled ? 'Cancelado' : 'Inativo';
+             
+             let dateLabel = 'Vence em';
+             let displayDate = '-';
+
+             if (isTrial && profile.trial_end) {
+                 dateLabel = 'Trial termina em';
+                 displayDate = format(parseISO(profile.trial_end), 'dd/MM/yyyy', { locale: ptBR });
+             } else if (isActive && profile.current_period_end) {
+                 dateLabel = 'Próxima renovação';
+                 displayDate = format(parseISO(profile.current_period_end), 'dd/MM/yyyy', { locale: ptBR });
+             }
+
+             return (
+                 <div className="space-y-6 animate-fade-in pb-12">
+                    <div className="bg-white p-6 rounded-xl shadow-md border border-gray-100">
+                        <h2 className="text-xl font-semibold text-gray-800 mb-6">Meu Plano</h2>
+                        <div className="flex flex-col md:flex-row gap-6">
+                            <div className="flex-1 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                <p className="text-sm text-slate-500 font-medium uppercase mb-1">Status Atual</p>
+                                <div className="flex items-center gap-2">
+                                     <span className={`px-3 py-1 rounded-full text-sm font-bold uppercase
+                                        ${isActive ? 'bg-green-100 text-green-700' : ''}
+                                        ${isTrial ? 'bg-blue-100 text-blue-700' : ''}
+                                        ${isCanceled ? 'bg-gray-200 text-gray-600' : ''}
+                                        ${profile.subscription_status === 'past_due' ? 'bg-orange-100 text-orange-700' : ''}
+                                     `}>
+                                        {statusLabel}
+                                     </span>
+                                </div>
+                            </div>
+                            <div className="flex-1 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                <p className="text-sm text-slate-500 font-medium uppercase mb-1">{dateLabel}</p>
+                                <p className="text-lg font-bold text-slate-800">{displayDate}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {!isActive && !isCanceled && (
+                         <div className="mt-8">
+                            <div className="text-center mb-8">
+                                <h3 className="text-2xl font-bold text-slate-800">Escolha seu Plano</h3>
+                                <p className="text-slate-500">Torne-se PRO para desbloquear relatórios, exportações e lançamentos ilimitados.</p>
+                            </div>
+                            <PricingTable 
+                                currentStatus={profile.subscription_status} 
+                                onSelectPlan={handlePlanSelection} 
+                                processingPlan={processingPlan}
+                            />
+                         </div>
+                    )}
+
+                    {!isCanceled && isActive && (
+                         <div className="bg-white p-6 rounded-xl shadow-md border border-red-100">
+                            <h3 className="text-lg font-bold text-red-600 mb-2">Zona de Perigo</h3>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Se você cancelar sua assinatura, perderá a capacidade de criar novos plantões, despesas e recebíveis imediatamente após o fim do ciclo atual.
+                            </p>
+                            <button 
+                                onClick={() => setIsCancelModalOpen(true)}
+                                className="px-4 py-2 bg-white border border-red-300 text-red-600 font-semibold rounded-lg hover:bg-red-50 transition-colors"
+                            >
+                                Cancelar Assinatura
+                            </button>
+                         </div>
+                    )}
+                 </div>
+             );
     }
   }
 
@@ -313,13 +438,12 @@ const ConfiguracoesPage: React.FC = () => {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-800">Perfil e Configurações</h1>
 
-      {/* Tabs Navigation */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
           <button
-            onClick={() => setActiveTab('perfil')}
+            onClick={() => setActiveConfigTab('perfil')}
             className={`${
-              activeTab === 'perfil'
+              activeConfigTab === 'perfil'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
@@ -327,9 +451,9 @@ const ConfiguracoesPage: React.FC = () => {
             Perfil
           </button>
           <button
-            onClick={() => setActiveTab('hospitais')}
+            onClick={() => setActiveConfigTab('hospitais')}
             className={`${
-              activeTab === 'hospitais'
+              activeConfigTab === 'hospitais'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
@@ -337,14 +461,24 @@ const ConfiguracoesPage: React.FC = () => {
             Hospitais
           </button>
           <button
-            onClick={() => setActiveTab('categorias')}
+            onClick={() => setActiveConfigTab('categorias')}
             className={`${
-              activeTab === 'categorias'
+              activeConfigTab === 'categorias'
                 ? 'border-primary text-primary'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
           >
             Categorias
+          </button>
+          <button
+            onClick={() => setActiveConfigTab('assinatura')}
+            className={`${
+              activeConfigTab === 'assinatura'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+          >
+            Minha Assinatura
           </button>
         </nav>
       </div>
@@ -353,7 +487,6 @@ const ConfiguracoesPage: React.FC = () => {
         {renderTabContent()}
       </div>
 
-      {/* Modal de Advertência */}
       <Modal isOpen={isWarningModalOpen} onClose={() => setIsWarningModalOpen(false)} title="Atenção">
         <div className="flex flex-col items-center text-center p-4">
             <div className="bg-yellow-100 p-3 rounded-full mb-4">
@@ -368,6 +501,32 @@ const ConfiguracoesPage: React.FC = () => {
             >
                 Entendi
             </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isCancelModalOpen} onClose={() => setIsCancelModalOpen(false)} title="Cancelar Assinatura">
+         <div className="space-y-4">
+            <div className="bg-red-50 text-red-800 p-4 rounded-md">
+                <p className="font-bold mb-2">Tem certeza que deseja cancelar?</p>
+                <p className="text-sm">Ao confirmar, seu status será alterado para cancelado imediatamente e você não poderá mais adicionar novos registros.</p>
+            </div>
+            <div className="flex justify-end pt-4">
+                <button 
+                    type="button" 
+                    onClick={() => setIsCancelModalOpen(false)} 
+                    className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg mr-2 hover:bg-gray-300"
+                >
+                    Voltar
+                </button>
+                <button 
+                    type="button" 
+                    onClick={handleCancelSubscription} 
+                    disabled={isCanceling} 
+                    className="bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                    {isCanceling ? 'Cancelando...' : 'Confirmar Cancelamento'}
+                </button>
+            </div>
         </div>
       </Modal>
     </div>

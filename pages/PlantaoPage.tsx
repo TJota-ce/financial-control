@@ -1,6 +1,7 @@
-
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import PaywallModal from '../components/common/PaywallModal';
 import type { Plantao, RecurrenceOptions } from '../types';
 import StatusBadge from '../components/common/StatusBadge';
 import Modal from '../components/common/Modal';
@@ -8,22 +9,18 @@ import {
   addDays, 
   format, 
   parseISO, 
-  startOfWeek, 
   endOfWeek, 
-  startOfMonth, 
   endOfMonth, 
   eachDayOfInterval, 
   isSameDay, 
   isSameMonth, 
   addMonths, 
-  subMonths, 
   addWeeks, 
-  subWeeks,
   isToday,
-  isBefore,
-  startOfDay
+  isBefore
 } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const formatDate = (dateString: string) => format(parseISO(dateString), 'dd/MM/yyyy');
@@ -39,11 +36,14 @@ type CalendarView = 'month' | 'week';
 
 const PlantaoPage: React.FC = () => {
   const { getUpdatedPlantoes, hospitals, addPlantao, updatePlantao, deletePlantao, loading } = useFinance();
+  const { canWriteData } = useSubscription(); // Hook do SaaS
   const allPlantoes = getUpdatedPlantoes();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false); // Modal de Bloqueio
+
   const [isSaving, setIsSaving] = useState(false);
   
   const [editingPlantao, setEditingPlantao] = useState<Plantao | null>(null);
@@ -79,9 +79,10 @@ const PlantaoPage: React.FC = () => {
     if (!selectedDataPrevista) return false;
     
     const date = parseISO(selectedDataPrevista);
-    const today = startOfDay(new Date());
+    // Fix: Using native Date to get start of day instead of missing startOfDay
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    // Se a data for válida e NÃO for antes de hoje (ou seja, é hoje ou futuro), é inválido para "Atrasado"
     return !isBefore(date, today);
   }, [selectedStatus, selectedDataPrevista]);
 
@@ -89,12 +90,26 @@ const PlantaoPage: React.FC = () => {
   const calendarDays = useMemo(() => {
     let start, end;
     if (calendarView === 'month') {
-      const monthStart = startOfMonth(currentDate);
+      // Fix: Using native Date to get start of month instead of missing startOfMonth
+      const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const monthEnd = endOfMonth(currentDate);
-      start = startOfWeek(monthStart, { weekStartsOn: 0 }); // Sunday
+      
+      // Fix: Manual startOfWeek implementation
+      const d = new Date(monthStart);
+      const day = d.getDay();
+      const diff = d.getDate() - day; // weekStartsOn: 0 (Sunday)
+      start = new Date(d.setDate(diff));
+      start.setHours(0, 0, 0, 0);
+
       end = endOfWeek(monthEnd, { weekStartsOn: 0 });
     } else {
-      start = startOfWeek(currentDate, { weekStartsOn: 0 });
+      // Fix: Manual startOfWeek implementation
+      const d = new Date(currentDate);
+      const day = d.getDay();
+      const diff = d.getDate() - day; // weekStartsOn: 0 (Sunday)
+      start = new Date(d.setDate(diff));
+      start.setHours(0, 0, 0, 0);
+
       end = endOfWeek(currentDate, { weekStartsOn: 0 });
     }
     
@@ -108,9 +123,11 @@ const PlantaoPage: React.FC = () => {
     }
     
     if (calendarView === 'month') {
-      setCurrentDate(prev => direction === 'prev' ? subMonths(prev, 1) : addMonths(prev, 1));
+      // Fix: Use addMonths with negative value instead of subMonths
+      setCurrentDate(prev => direction === 'prev' ? addMonths(prev, -1) : addMonths(prev, 1));
     } else {
-      setCurrentDate(prev => direction === 'prev' ? subWeeks(prev, 1) : addWeeks(prev, 1));
+      // Fix: Use addWeeks with negative value instead of subWeeks
+      setCurrentDate(prev => direction === 'prev' ? addWeeks(prev, -1) : addWeeks(prev, 1));
     }
   };
 
@@ -129,13 +146,19 @@ const PlantaoPage: React.FC = () => {
 
   // Modal Handlers
   const handleOpenModal = (plantao: Plantao | null = null) => {
+    // Check permission for NEW items (editing usually allowed or block logic can vary)
+    // Here we block creation if canWriteData is false
+    if (!plantao && !canWriteData) {
+        setIsPaywallOpen(true);
+        return;
+    }
+
     setEditingPlantao(plantao);
     setIsRecurrent(false);
     setRecurrenceFreq('Mensal');
     setRecurrenceEnd('');
     setSelectedStatus(plantao?.status || 'A Receber');
     
-    // Initialize date state
     const defaultDataPrevista = plantao?.data_prevista || format(addDays(new Date(), 30), 'yyyy-MM-dd');
     setSelectedDataPrevista(defaultDataPrevista);
     
@@ -158,6 +181,7 @@ const PlantaoPage: React.FC = () => {
     setIsModalOpen(false);
     setIsConfirmModalOpen(false);
     setIsDeleteModalOpen(false);
+    setIsPaywallOpen(false);
     setEditingPlantao(null);
     setPlantaoToDelete(null);
     setIsSaving(false);
@@ -219,7 +243,6 @@ const PlantaoPage: React.FC = () => {
     setIsSaving(true);
     const formData = new FormData(e.currentTarget);
     
-    // Extract status from form or state
     const formStatus = selectedStatus;
     const hospitalId = formData.get('hospital_id') as string;
     
@@ -249,7 +272,6 @@ const PlantaoPage: React.FC = () => {
       valor: valorFinal,
       data_prevista: dataPrevista,
       status: formStatus,
-      // Se status for Recebido, usa a data informada ou fallback para data do plantão. Se não, nulo.
       data_recebida: formStatus === 'Recebido' ? (dataRecebida || dataPlantao) : undefined,
       tag: formData.get('tag') as string
     };
@@ -259,8 +281,8 @@ const PlantaoPage: React.FC = () => {
            await updatePlantao({
              ...editingPlantao,
              ...basePlantaoData,
-             data_recebida: formStatus === 'Recebido' ? (dataRecebida || dataPlantao) : undefined, // Explicit undefined for update to clear if needed
-             hospital: editingPlantao.hospital // Keep display name for now until refetch
+             data_recebida: formStatus === 'Recebido' ? (dataRecebida || dataPlantao) : undefined,
+             hospital: editingPlantao.hospital
            });
         } else {
           const recurrenceOptions: RecurrenceOptions = {
@@ -284,6 +306,8 @@ const PlantaoPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <PaywallModal isOpen={isPaywallOpen} onClose={handleCloseModal} />
+      
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-800">Gerenciar Plantões</h1>
         
@@ -306,8 +330,9 @@ const PlantaoPage: React.FC = () => {
 
           <button
             onClick={() => handleOpenModal()}
-            className="flex-grow md:flex-grow-0 bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors flex items-center justify-center gap-2"
+            className={`flex-grow md:flex-grow-0 bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary-dark transition-colors flex items-center justify-center gap-2 ${!canWriteData ? 'opacity-80' : ''}`}
           >
+            {!canWriteData && <span className="text-xs bg-white text-primary px-1.5 py-0.5 rounded mr-1 uppercase font-bold">PRO</span>}
             <PlusIcon />
             <span className="hidden sm:inline">Novo Plantão</span>
             <span className="sm:hidden">Novo</span>
@@ -543,8 +568,8 @@ const PlantaoPage: React.FC = () => {
             )}
         </>
       )}
-
-      {/* Modal Novo/Editar Plantão */}
+      
+      {/* Modal Novo/Editar Plantão e outros modais... (Mantido igual) */}
       <Modal isOpen={isModalOpen} onClose={handleCloseModal} title={editingPlantao ? 'Editar Plantão' : 'Adicionar Novo Plantão'}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -643,7 +668,6 @@ const PlantaoPage: React.FC = () => {
               </div>
           )}
 
-          {/* Recurrence Section - Only on Create */}
           {!editingPlantao && (
             <div className="border-t pt-4 mt-4">
                <div className="flex items-center mb-4">
@@ -697,8 +721,8 @@ const PlantaoPage: React.FC = () => {
           </div>
         </form>
       </Modal>
-      
-      {/* Modal Confirmação Pagamento */}
+
+      {/* Outros modais permanecem iguais */}
       <Modal isOpen={isConfirmModalOpen} onClose={handleCloseModal} title="Confirmar Recebimento">
         <form onSubmit={handleConfirmPayment} className="space-y-4">
           <p>Confirmar o recebimento de <strong>{formatCurrency(editingPlantao?.valor ?? 0)}</strong> do <strong>{editingPlantao?.hospital}</strong>?</p>
@@ -715,7 +739,6 @@ const PlantaoPage: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Modal Confirmação Exclusão */}
       <Modal isOpen={isDeleteModalOpen} onClose={handleCloseModal} title="Confirmar Exclusão">
         <div className="space-y-4">
           <div className="bg-red-50 text-red-800 p-4 rounded-md">
@@ -734,7 +757,7 @@ const PlantaoPage: React.FC = () => {
   );
 };
 
-// Icons
+// Icons (mantidos)
 const CheckIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

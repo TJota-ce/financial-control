@@ -1,8 +1,11 @@
-
 import React, { useState, useMemo } from 'react';
 import { useFinance } from '../contexts/FinanceContext';
-import { addMonths, eachMonthOfInterval, endOfMonth, format, getYear, isSameMonth, parseISO, startOfMonth, subMonths, isValid, isBefore, isAfter, startOfDay, endOfDay } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { useSubscription } from '../contexts/SubscriptionContext';
+import PaywallModal from '../components/common/PaywallModal';
+// Fix: Removed startOfMonth, subMonths, and startOfDay from imports as they are reported as missing
+import { addMonths, eachMonthOfInterval, endOfMonth, format, getYear, isSameMonth, parseISO, isValid, isBefore, isAfter, endOfDay } from 'date-fns';
+// Fix: Use subpath for ptBR locale to avoid index missing export error
+import { ptBR } from 'date-fns/locale/pt-BR';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -31,7 +34,10 @@ const LoadingSpinner: React.FC = () => (
 
 const RelatoriosPage: React.FC = () => {
   const { plantoes, despesas, recebiveis, getUpdatedPlantoes, getUpdatedRecebiveis, loading } = useFinance();
+  const { isPro, isAdmin } = useSubscription();
+  
   const [activeTab, setActiveTab] = useState('visaoGeral');
+  const [isPaywallOpen, setIsPaywallOpen] = useState(false);
   
   // States para Visão Geral
   const [period, setPeriod] = useState<PeriodOption>('thisMonth');
@@ -39,17 +45,25 @@ const RelatoriosPage: React.FC = () => {
   // States para Extrato
   const [extratoMonth, setExtratoMonth] = useState(new Date());
 
+  const canExport = isPro || isAdmin;
+
   // --- LÓGICA DA VISÃO GERAL ---
   const { startDate, endDate } = useMemo(() => {
     const now = new Date();
     switch (period) {
       case 'last3Months':
-        return { startDate: startOfMonth(subMonths(now, 2)), endDate: endOfMonth(now) };
+        // Fix: Manual startOfMonth and addMonths with negative value instead of subMonths
+        const threeMonthsAgo = addMonths(now, -2);
+        return { 
+          startDate: new Date(threeMonthsAgo.getFullYear(), threeMonthsAgo.getMonth(), 1), 
+          endDate: endOfMonth(now) 
+        };
       case 'thisYear':
         return { startDate: new Date(getYear(now), 0, 1), endDate: new Date(getYear(now), 11, 31) };
       case 'thisMonth':
       default:
-        return { startDate: startOfMonth(now), endDate: endOfMonth(now) };
+        // Fix: Manual startOfMonth
+        return { startDate: new Date(now.getFullYear(), now.getMonth(), 1), endDate: endOfMonth(now) };
     }
   }, [period]);
 
@@ -111,16 +125,12 @@ const RelatoriosPage: React.FC = () => {
 
   // --- LÓGICA DO EXTRATO ---
   const extratoData = useMemo(() => {
-    const startOfExtratoMonth = startOfMonth(extratoMonth);
-    // const endOfExtratoMonth = endOfMonth(extratoMonth); // Not used currently
-    
-    // Define o limite de "hoje" (fim do dia) para considerar despesas como efetivadas
+    // Fix: Manual startOfMonth
+    const startOfExtratoMonth = new Date(extratoMonth.getFullYear(), extratoMonth.getMonth(), 1);
     const todayLimit = endOfDay(new Date());
 
-    // 1. Calcular Saldo Anterior (Tudo antes do dia 01 do mês selecionado)
     let saldoAnterior = 0;
 
-    // Entradas anteriores (Plantões pagos)
     getUpdatedPlantoes().forEach(p => {
         if (p.status === 'Recebido' && p.data_recebida) {
             const dt = parseISO(p.data_recebida);
@@ -129,7 +139,6 @@ const RelatoriosPage: React.FC = () => {
             }
         }
     });
-    // Entradas anteriores (Outros recebíveis pagos)
     getUpdatedRecebiveis().forEach(r => {
         if (r.status === 'Recebido' && r.data_recebida) {
             const dt = parseISO(r.data_recebida);
@@ -138,19 +147,15 @@ const RelatoriosPage: React.FC = () => {
             }
         }
     });
-    // Saídas anteriores (Despesas)
     despesas.forEach(d => {
         const dt = parseISO(d.data);
-        // Despesa conta se for antes do mês selecionado E se a data já passou (ou é hoje)
         if (isValid(dt) && isBefore(dt, startOfExtratoMonth) && !isAfter(dt, todayLimit)) {
             saldoAnterior -= d.valor;
         }
     });
 
-    // 2. Listar Transações do Mês
     const transactions: Transaction[] = [];
 
-    // Plantões do mês
     getUpdatedPlantoes().forEach(p => {
         if (p.status === 'Recebido' && p.data_recebida) {
             const dt = parseISO(p.data_recebida);
@@ -167,7 +172,6 @@ const RelatoriosPage: React.FC = () => {
         }
     });
 
-    // Recebíveis do mês
     getUpdatedRecebiveis().forEach(r => {
         if (r.status === 'Recebido' && r.data_recebida) {
              const dt = parseISO(r.data_recebida);
@@ -184,10 +188,8 @@ const RelatoriosPage: React.FC = () => {
         }
     });
 
-    // Despesas do mês
     despesas.forEach(d => {
         const dt = parseISO(d.data);
-         // Despesa conta se for no mês selecionado E se a data já passou (ou é hoje)
          if (isValid(dt) && isSameMonth(dt, extratoMonth) && !isAfter(dt, todayLimit)) {
             transactions.push({
                 id: d.id,
@@ -200,10 +202,8 @@ const RelatoriosPage: React.FC = () => {
          }
     });
 
-    // 3. Ordenar por data
     transactions.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-    // 4. Calcular Saldo Linha a Linha e Totais do Mês
     let currentBalance = saldoAnterior;
     let totalEntradas = 0;
     let totalSaidas = 0;
@@ -231,35 +231,33 @@ const RelatoriosPage: React.FC = () => {
 
   // --- EXPORT FUNCTIONS ---
   const handleExportPDF = () => {
+    if (!canExport) {
+        setIsPaywallOpen(true);
+        return;
+    }
+
     const doc = new jsPDF();
     const monthStr = format(extratoMonth, 'MMMM yyyy', { locale: ptBR }).toUpperCase();
     
     // --- APP HEADER ---
-    // Logo Background
-    doc.setFillColor(79, 70, 229); // Primary Indigo (#4F46E5)
+    doc.setFillColor(79, 70, 229); 
     doc.roundedRect(14, 10, 12, 12, 3, 3, 'F');
 
-    // Logo Icon (Lightning Bolt) - Vector Drawing
     doc.setFillColor(255, 255, 255);
-    // Path vectors scaled (0.25 scale factor => 24 units = 6mm size)
-    // Centered in 12mm box (margin 3mm)
     const s = 0.25;
-    const ix = 14 + 3; // X Origin for icon
-    const iy = 10 + 3; // Y Origin for icon
-    
-    // Start at path origin relative to grid (13, 10)
+    const ix = 14 + 3; 
+    const iy = 10 + 3; 
     const sx = ix + (13 * s);
     const sy = iy + (10 * s);
 
-    // Drawing Path: M13 10V3L4 14h7v7l9-11h-7z
     doc.lines(
         [
-            [0, -7 * s],      // V3 (10->3)
-            [-9 * s, 11 * s], // L4 14 (13,3 -> 4,14)
-            [7 * s, 0],       // h7
-            [0, 7 * s],       // v7
-            [9 * s, -11 * s], // l9 -11
-            [-7 * s, 0]       // h-7
+            [0, -7 * s],      
+            [-9 * s, 11 * s], 
+            [7 * s, 0],       
+            [0, 7 * s],       
+            [9 * s, -11 * s], 
+            [-7 * s, 0]       
         ],
         sx,
         sy,
@@ -268,20 +266,17 @@ const RelatoriosPage: React.FC = () => {
         true
     );
 
-    // App Name & Branding
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
-    doc.setTextColor(30, 41, 59); // Slate 800
+    doc.setTextColor(30, 41, 59); 
     doc.text("Shifts", 30, 18);
 
     doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184); // Slate 400
+    doc.setTextColor(148, 163, 184); 
     doc.text("GESTÃO FINANCEIRA", 30, 22);
 
-    // --- REPORT CONTENT ---
     const startY_Report = 35;
     
-    // Title
     doc.setFont("helvetica", "normal");
     doc.setFontSize(12);
     doc.setTextColor(30, 41, 59);
@@ -291,10 +286,9 @@ const RelatoriosPage: React.FC = () => {
     doc.setTextColor(100);
     doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, startY_Report + 5);
 
-    // Summary Box
     const boxY = 45;
-    doc.setDrawColor(226, 232, 240); // Slate 200
-    doc.setFillColor(248, 250, 252); // Slate 50
+    doc.setDrawColor(226, 232, 240); 
+    doc.setFillColor(248, 250, 252); 
     doc.roundedRect(14, boxY, 182, 24, 2, 2, 'FD');
     
     const textY = boxY + 8;
@@ -312,16 +306,15 @@ const RelatoriosPage: React.FC = () => {
     doc.setTextColor(50);
     doc.text(formatCurrency(extratoData.saldoAnterior), 20, valY);
     
-    doc.setTextColor(16, 185, 129); // Emerald
+    doc.setTextColor(16, 185, 129); 
     doc.text(`+ ${formatCurrency(extratoData.totalEntradas)}`, 70, valY);
     
-    doc.setTextColor(225, 29, 72); // Rose
+    doc.setTextColor(225, 29, 72); 
     doc.text(`- ${formatCurrency(extratoData.totalSaidas)}`, 120, valY);
     
-    doc.setTextColor(79, 70, 229); // Primary (Indigo)
+    doc.setTextColor(79, 70, 229); 
     doc.text(formatCurrency(extratoData.saldoFinal), 170, valY);
 
-    // Table
     const tableBody = extratoData.transactions.map(t => [
         formatDate(t.date),
         t.description,
@@ -330,9 +323,10 @@ const RelatoriosPage: React.FC = () => {
         formatCurrency(t.balanceAfter || 0)
     ]);
 
-    // Initial Row (Previous Balance)
+    // Fix: Manual startOfMonth
+    const firstDay = new Date(extratoMonth.getFullYear(), extratoMonth.getMonth(), 1);
     const initialRow = [
-        formatDate(startOfMonth(extratoMonth)),
+        formatDate(firstDay),
         'Saldo Anterior',
         '-',
         '-',
@@ -346,8 +340,8 @@ const RelatoriosPage: React.FC = () => {
         styles: { fontSize: 9, cellPadding: 3 },
         headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: 'bold', lineColor: [226, 232, 240], lineWidth: 0.1 },
         columnStyles: {
-            3: { halign: 'right', fontStyle: 'bold' }, // Valor
-            4: { halign: 'right' }  // Saldo
+            3: { halign: 'right', fontStyle: 'bold' }, 
+            4: { halign: 'right' }  
         },
         didParseCell: (data) => {
             if (data.section === 'body' && data.column.index === 3) {
@@ -359,7 +353,7 @@ const RelatoriosPage: React.FC = () => {
         didDrawPage: (data) => {
             const str = "© 2025 Solution. Todos os direitos reservados.";
             doc.setFontSize(8);
-            doc.setTextColor(148, 163, 184); // Slate 400
+            doc.setTextColor(148, 163, 184); 
             const pageSize = doc.internal.pageSize;
             const pageHeight = pageSize.height ? pageSize.height : pageSize.getHeight();
             const pageWidth = pageSize.width ? pageSize.width : pageSize.getWidth();
@@ -371,6 +365,11 @@ const RelatoriosPage: React.FC = () => {
   };
 
   const handleExportExcel = () => {
+    if (!canExport) {
+        setIsPaywallOpen(true);
+        return;
+    }
+
     const monthStr = format(extratoMonth, 'MMMM yyyy', { locale: ptBR });
     
     const wsData = [
@@ -387,9 +386,10 @@ const RelatoriosPage: React.FC = () => {
         ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Saldo Acumulado']
     ];
 
-    // Add Initial Balance Row
+    // Fix: Manual startOfMonth
+    const firstDay = new Date(extratoMonth.getFullYear(), extratoMonth.getMonth(), 1);
     wsData.push([
-        formatDate(startOfMonth(extratoMonth)),
+        formatDate(firstDay),
         'Saldo Anterior',
         '-',
         '-',
@@ -397,31 +397,23 @@ const RelatoriosPage: React.FC = () => {
         extratoData.saldoAnterior
     ]);
 
-    // Add Transactions
     extratoData.transactions.forEach(t => {
         wsData.push([
             formatDate(t.date),
             t.description,
             t.category,
             t.type === 'credit' ? 'Crédito' : 'Débito',
-            t.type === 'credit' ? t.value : -t.value, // Excel stores raw numbers
+            t.type === 'credit' ? t.value : -t.value, 
             t.balanceAfter
         ]);
     });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-    // Format numbers
-    const currencyFmt = '"R$" #,##0.00';
-    // Logic to apply ranges would be complex here without Pro features of SheetJS, 
-    // but standard raw numbers work fine for Excel.
-
     XLSX.utils.book_append_sheet(wb, ws, "Extrato");
     XLSX.writeFile(wb, `Extrato_${format(extratoMonth, 'yyyy_MM')}.xlsx`);
   };
 
-  // Cores: Primary (Indigo) e Secondary (Violet)
   const COLORS = ['#4F46E5', '#7C3AED'];
 
   const renderContent = () => {
@@ -481,14 +473,13 @@ const RelatoriosPage: React.FC = () => {
       case 'extrato':
         return (
             <div className="space-y-6 animate-fade-in">
-                {/* Header do Extrato */}
                 <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm gap-4">
                     <div className="flex items-center gap-2 md:w-1/3">
-                         {/* Spacer or additional controls if needed */}
                     </div>
 
                     <div className="flex items-center justify-center gap-4 md:w-1/3">
-                        <button onClick={() => setExtratoMonth(prev => subMonths(prev, 1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">
+                        {/* Fix: Use addMonths with negative value instead of subMonths */}
+                        <button onClick={() => setExtratoMonth(prev => addMonths(prev, -1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">
                             <ChevronLeftIcon />
                         </button>
                         <div className="flex flex-col items-center min-w-[140px]">
@@ -507,24 +498,25 @@ const RelatoriosPage: React.FC = () => {
                     <div className="flex items-center justify-end gap-2 md:w-1/3">
                         <button 
                             onClick={handleExportPDF}
-                            className="flex items-center gap-2 px-3 py-2 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 border border-rose-200 transition-colors text-sm font-medium"
-                            title="Exportar para PDF"
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium border relative group ${canExport ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200' : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'}`}
+                            title={canExport ? "Exportar para PDF" : "Recurso exclusivo do Plano PRO"}
                         >
+                            {!canExport && <span className="absolute -top-2 -right-2 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black shadow-sm">PRO</span>}
                             <PDFIcon />
                             <span className="hidden sm:inline">PDF</span>
                         </button>
                         <button 
                             onClick={handleExportExcel}
-                            className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 border border-emerald-200 transition-colors text-sm font-medium"
-                            title="Exportar para Excel"
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-medium border relative group ${canExport ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200 opacity-70'}`}
+                            title={canExport ? "Exportar para Excel" : "Recurso exclusivo do Plano PRO"}
                         >
+                             {!canExport && <span className="absolute -top-2 -right-2 bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black shadow-sm">PRO</span>}
                             <ExcelIcon />
                             <span className="hidden sm:inline">Excel</span>
                         </button>
                     </div>
                 </div>
 
-                {/* Cards de Resumo */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                         <p className="text-xs font-semibold text-slate-500 uppercase">Saldo Anterior</p>
@@ -544,7 +536,6 @@ const RelatoriosPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Tabela de Extrato */}
                 <div className="bg-white rounded-xl shadow-soft border border-slate-100 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
@@ -558,9 +549,9 @@ const RelatoriosPage: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
-                                {/* Linha de Saldo Inicial */}
                                 <tr className="bg-slate-50/50">
-                                    <td className="px-6 py-4 font-medium text-slate-400">{formatDate(startOfMonth(extratoMonth))}</td>
+                                    {/* Fix: Manual startOfMonth */}
+                                    <td className="px-6 py-4 font-medium text-slate-400">{formatDate(new Date(extratoMonth.getFullYear(), extratoMonth.getMonth(), 1))}</td>
                                     <td className="px-6 py-4 font-medium text-slate-500 italic">Saldo Anterior</td>
                                     <td className="px-6 py-4">-</td>
                                     <td className="px-6 py-4 text-right text-slate-400">-</td>
@@ -602,7 +593,6 @@ const RelatoriosPage: React.FC = () => {
       default:
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
-             {/* Header Visão Geral */}
              <div className="lg:col-span-2 flex justify-end">
                  <select value={period} onChange={e => setPeriod(e.target.value as PeriodOption)} className="p-2.5 border border-slate-200 rounded-lg bg-white text-sm font-medium text-slate-700 focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
                      <option value="thisMonth">Este Mês</option>
@@ -665,6 +655,8 @@ const RelatoriosPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <PaywallModal isOpen={isPaywallOpen} onClose={() => setIsPaywallOpen(false)} />
+
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Relatórios Financeiros</h1>
       </div>

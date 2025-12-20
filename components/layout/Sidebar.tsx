@@ -2,6 +2,7 @@
 import React, { useState, ReactNode } from 'react';
 import type { Page } from '../../types';
 import { useFinance } from '../../contexts/FinanceContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
 
 interface HeaderProps {
   activePage: Page;
@@ -18,16 +19,23 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ page, activePage, setActivePage, icon, isMobile = false }) => {
   const isActive = activePage === page;
+  const { setActiveConfigTab } = useFinance();
   
+  const handleNav = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Se for para a página de perfil, garante que abra na aba correta 'perfil'
+    if (page === 'Perfil') {
+        setActiveConfigTab('perfil');
+    }
+    setActivePage(page);
+  };
+
   if (isMobile) {
       return (
         <li>
         <a
             href="#"
-            onClick={(e) => {
-            e.preventDefault();
-            setActivePage(page);
-            }}
+            onClick={handleNav}
             className={`flex items-center p-4 transition-colors duration-200 ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-gray-600 hover:bg-gray-50'}`}
         >
             <div className={isActive ? "text-primary" : "text-gray-400"}>{icon}</div>
@@ -41,10 +49,7 @@ const NavItem: React.FC<NavItemProps> = ({ page, activePage, setActivePage, icon
     <li>
       <a
         href="#"
-        onClick={(e) => {
-          e.preventDefault();
-          setActivePage(page);
-        }}
+        onClick={handleNav}
         className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
             isActive 
             ? 'text-white bg-white/10 shadow-sm ring-1 ring-white/10' 
@@ -59,7 +64,8 @@ const NavItem: React.FC<NavItemProps> = ({ page, activePage, setActivePage, icon
 };
 
 const Header = ({ activePage, setActivePage }: HeaderProps) => {
-  const { profile, logout } = useFinance();
+  const { profile, logout, setActiveConfigTab } = useFinance();
+  const { isAdmin, isPro } = useSubscription();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const navItems: { page: Page; icon: ReactNode }[] = [
@@ -70,9 +76,20 @@ const Header = ({ activePage, setActivePage }: HeaderProps) => {
     { page: 'Relatórios', icon: <ChartBarIcon /> },
     { page: 'Perfil', icon: <CogIcon /> },
   ];
+  
+  if (isAdmin) {
+      navItems.push({ page: 'Admin', icon: <ShieldIcon /> });
+  }
 
   const handleLogout = () => {
     logout();
+  };
+
+  // Handler para o botão SEJA PRO - Direciona para a aba de assinatura
+  const handleUpgradeClick = () => {
+    setActiveConfigTab('assinatura');
+    setActivePage('Perfil');
+    setIsMobileMenuOpen(false);
   };
 
   return (
@@ -102,6 +119,19 @@ const Header = ({ activePage, setActivePage }: HeaderProps) => {
           </nav>
 
           <div className="flex items-center ml-auto gap-4">
+             {/* Botão Upgrade PRO para usuários free */}
+             {!isPro && !isAdmin && (
+               <button 
+                onClick={handleUpgradeClick}
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-amber-500/30 hover:scale-105 transition-transform"
+               >
+                 Seja PRO
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                 </svg>
+               </button>
+             )}
+
              {profile && (
                <div className="flex items-center pl-4 border-l border-white/10">
                   <div className="hidden md:block text-right mr-3">
@@ -142,14 +172,22 @@ const Header = ({ activePage, setActivePage }: HeaderProps) => {
                   setIsMobileMenuOpen(false);
                 }} isMobile />
               ))}
-               <li className="border-t border-gray-100 mt-2 pt-2">
+               <li className="border-t border-gray-100 mt-2 pt-2 px-4">
+                 {!isPro && !isAdmin && (
+                    <button 
+                      onClick={handleUpgradeClick}
+                      className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-white font-bold mb-3"
+                    >
+                      Assinar Plano PRO
+                    </button>
+                 )}
                 <a
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
                     handleLogout();
                   }}
-                  className="flex items-center p-4 text-red-600 hover:bg-red-50"
+                  className="flex items-center p-4 text-red-600 hover:bg-red-50 rounded-lg"
                 >
                   <div className=""><LogoutIcon /></div>
                   <span className="ml-3 font-medium">Sair do Sistema</span>
@@ -168,9 +206,10 @@ const DashboardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h
 const StethoscopeIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>;
 const ReceiptIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
 const CreditCardIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>;
-const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
+const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
 const CogIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
 const MenuIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>;
 const LogoutIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>;
+const ShieldIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>;
 
 export default Header;

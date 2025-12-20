@@ -1,5 +1,5 @@
 import type { FinanceData } from '../types';
-import { addDays, format, subDays } from 'date-fns';
+import { addDays, format } from 'date-fns';
 
 const d = (date: Date) => format(date, 'yyyy-MM-dd');
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -16,28 +16,35 @@ export const INITIAL_DATA: FinanceData = {
       id: generateId(),
       user_id: 'user-123',
       hospital: 'Hospital Sírio-Libanês',
-      data: d(subDays(new Date(), 15)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -15)),
       valor: 1800,
-      data_prevista: d(addDays(subDays(new Date(), 15), 30)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_prevista: d(addDays(addDays(new Date(), -15), 30)),
       status: 'A Receber',
     },
     {
       id: generateId(),
       user_id: 'user-123',
       hospital: 'Hospital Albert Einstein',
-      data: d(subDays(new Date(), 40)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -40)),
       valor: 2200,
-      data_prevista: d(addDays(subDays(new Date(), 40), 30)),
-      data_recebida: d(subDays(new Date(), 10)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_prevista: d(addDays(addDays(new Date(), -40), 30)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_recebida: d(addDays(new Date(), -10)),
       status: 'Recebido',
     },
      {
       id: generateId(),
       user_id: 'user-123',
       hospital: 'HCor',
-      data: d(subDays(new Date(), 70)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -70)),
       valor: 1500,
-      data_prevista: d(addDays(subDays(new Date(), 70), 30)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_prevista: d(addDays(addDays(new Date(), -70), 30)),
       status: 'Atrasado',
     },
   ],
@@ -47,8 +54,10 @@ export const INITIAL_DATA: FinanceData = {
       user_id: 'user-123',
       descricao: 'Consulta Particular - Paciente Y',
       valor: 450,
-      data: d(subDays(new Date(), 5)),
-      data_prevista: d(addDays(subDays(new Date(), 5), 10)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -5)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_prevista: d(addDays(addDays(new Date(), -5), 10)),
       status: 'A Receber',
     },
   ],
@@ -59,9 +68,11 @@ export const INITIAL_DATA: FinanceData = {
       categoria: 'Consultório',
       descricao: 'Aluguel do Consultório',
       valor: 2500,
-      data: d(subDays(new Date(), 25)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -25)),
       status: 'Pago',
-      data_pagamento: d(subDays(new Date(), 25)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_pagamento: d(addDays(new Date(), -25)),
       recorrente: true,
     },
     {
@@ -70,9 +81,11 @@ export const INITIAL_DATA: FinanceData = {
       categoria: 'Transporte',
       descricao: 'Combustível',
       valor: 350,
-      data: d(subDays(new Date(), 3)),
+      // Fix: Use addDays with negative value instead of subDays
+      data: d(addDays(new Date(), -3)),
       status: 'Pago',
-      data_pagamento: d(subDays(new Date(), 3)),
+      // Fix: Use addDays with negative value instead of subDays
+      data_pagamento: d(addDays(new Date(), -3)),
       recorrente: false,
     },
   ],
